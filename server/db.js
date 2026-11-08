@@ -226,6 +226,12 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS show_women_images BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS show_women_singing BOOLEAN NOT NULL DEFAULT FALSE;
+
+DELETE FROM media WHERE id IN (SELECT media_id FROM statuses WHERE kind <> 'video' AND media_id IS NOT NULL);
+DELETE FROM statuses WHERE kind <> 'video';
 `;
   for (const stmt of statements.split(/;\s*\n/).map((s) => s.trim()).filter(Boolean)) {
     await impl.query(stmt);

@@ -25,8 +25,10 @@ export function setLang(next) {
   } catch {
     /* storage unavailable */
   }
+  // Only the words change; the layout stays put. Yiddish text still reads right-to-left
+  // inside its own element thanks to dir="auto" / Unicode bidi.
   document.documentElement.lang = lang.current === 'yi' ? 'yi' : 'en';
-  document.documentElement.dir = lang.current === 'yi' ? 'rtl' : 'ltr';
+  document.documentElement.dir = 'ltr';
 }
 setLang(lang.current);
 

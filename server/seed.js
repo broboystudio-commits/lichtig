@@ -90,8 +90,9 @@ async function seedFile(name, ownerId) {
   return m ? m.id : null;
 }
 
-async function seedStatuses() {
-  if ((await one('SELECT COUNT(*)::int AS n FROM statuses')).n > 0) return;
+async function seedShorts() {
+  // Runs once per database, so demo shorts the admin deletes don't come back.
+  if (await one(`SELECT 1 FROM settings WHERE key = 'seed_shorts_v2'`)) return;
   const creators = [
     ['lichtig', 'Lichtig', 'The official Lichtig channel.'],
     ['dailychizuk', 'Daily Chizuk', 'A little chizuk every day.'],
@@ -107,25 +108,26 @@ async function seedStatuses() {
     ids[username] = u ? u.id : (await one('SELECT id FROM users WHERE lower(username) = $1', [username])).id;
   }
   const H = 3600 * 1000;
-  const posts = [
-    [ids.lichtig, 'text', 'Welcome to Lichtig! Watch kosher videos, follow your favorite creators, and set parental controls for your family.', '#123b7a', null, 0.5],
-    [ids.lichtig, 'text', 'ברוכים הבאים צו ליכטיג! קוקט כשר׳ע ווידיאוס און סטאטוסן.', '#065f46', null, 0.4],
-    [ids.dailychizuk, 'video', 'Ein Od Milvado', null, 'status-einod.mp4', 1.5],
-    [ids.dailychizuk, 'image', 'Gam zu l’tovah', null, 'status-gamzu.jpg', 3],
-    [ids.dailychizuk, 'text', '“Know where you came from, where you are going, and before Whom you will give an accounting.” (Pirkei Avos 3:1)', '#7c2d12', null, 26],
-    [ids.heimishvibes, 'video', 'A Gut Voch to everyone!', null, 'status-gutvoch.mp4', 2],
-    [ids.heimishvibes, 'image', 'Shabbos is on its way', null, 'status-shabbos.jpg', 28],
-    [ids.heimishvibes, 'text', 'א גוטע וואך! א וואך פון געזונט, פרנסה און נחת.', '#6b21a8', null, 50],
+  // Shorts are always videos. Each demo short is added once (matched by creator + caption).
+  const shorts = [
+    [ids.lichtig, 'Welcome to Lichtig: kosher shorts for the whole family.', 'short-welcome.mp4', 0.5],
+    [ids.dailychizuk, 'Ein Od Milvado', 'status-einod.mp4', 1.5],
+    [ids.dailychizuk, 'Gam zu l’tovah', 'short-gamzu.mp4', 3],
+    [ids.dailychizuk, 'Pirkei Avos 1:2', 'short-avos.mp4', 26],
+    [ids.heimishvibes, 'A Gut Voch to everyone!', 'status-gutvoch.mp4', 2],
+    [ids.heimishvibes, 'Shabbos is on its way', 'short-shabbos.mp4', 28],
   ];
-  for (const [userId, kind, body, bg, file, hoursAgo] of posts) {
-    const mediaId = file ? await seedFile(file, userId) : null;
-    if (file && !mediaId) continue;
+  for (const [userId, body, file, hoursAgo] of shorts) {
+    if (await one(`SELECT 1 FROM statuses WHERE user_id = $1 AND body = $2 AND kind = 'video'`, [userId, body])) continue;
+    const mediaId = await seedFile(file, userId);
+    if (!mediaId) continue;
     await query(
-      `INSERT INTO statuses (user_id, kind, body, bg, media_id, kid_safe, status, created_at)
-       VALUES ($1, $2, $3, $4, $5, TRUE, 'published', $6)`,
-      [userId, kind, body, bg || '#123b7a', mediaId, new Date(Date.now() - hoursAgo * H)],
+      `INSERT INTO statuses (user_id, kind, body, media_id, kid_safe, status, created_at)
+       VALUES ($1, 'video', $2, $3, TRUE, 'published', $4)`,
+      [userId, body, mediaId, new Date(Date.now() - hoursAgo * H)],
     );
   }
+  await query(`INSERT INTO settings (key, value) VALUES ('seed_shorts_v2', 'true'::jsonb) ON CONFLICT DO NOTHING`);
 }
 
 async function seedAds() {
@@ -146,7 +148,7 @@ export async function seed({ demoContent = true } = {}) {
   await ensureAdmin();
   if (demoContent) {
     await seedVideos();
-    await seedStatuses();
+    await seedShorts();
     await seedAds();
   }
 }

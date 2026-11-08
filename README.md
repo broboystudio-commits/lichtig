@@ -4,14 +4,15 @@ Kosher videos, shorts and statuses for the whole family, in English and Yiddish.
 
 ## What it does
 
-- **Videos.** A curated library of Jewish YouTube videos organized by category (Torah & Shiurim, Music, Kids, Chizuk, History, Simchas & Yom Tov, Cooking, News, Comedy). They play in YouTube's own embedded player. The admin can also upload original videos hosted on Lichtig.
-- **Statuses.** WhatsApp-style statuses from creators, browsable by day. They open in a full-screen viewer.
-- **Shorts.** A vertical feed made from video statuses.
-- **Kosher moderation.** New creators' statuses wait for admin approval, trusted creators publish directly, and viewers can report anything.
-- **Parental controls (PIN-locked).** Options are Kids mode, hide music, automatically hide music during Sefirah and the Three Weeks, hide women singing, hide images of women, hide news, hide statuses, and a daily time limit. The settings also stay locked on the device after signing out.
-- **Shabbos & Yom Tov mode.** The whole site closes from candle lighting to havdalah for the chosen city. The home page shows the Hebrew date and the next candle-lighting time.
-- **Premium subscription.** Premium removes all ads and allows downloading statuses, shorts and Lichtig-hosted videos. It works with Stripe. Until Stripe is connected, the admin can turn on Premium by hand.
+- **Videos.** A curated library of Jewish YouTube videos organized by category (Torah & Shiurim, Music, Kids, Chizuk, History, Simchas & Yom Tov, Cooking, News, Comedy). Each video shows a Lichtig-branded cover with no YouTube logo or "Watch on YouTube" until the viewer taps play. Our own "Up next" screen replaces YouTube's end-of-video suggestions. The admin can also upload original videos hosted on Lichtig.
+- **Shorts.** Short vertical videos posted by the community. Viewers can swipe through the feed or browse by creator and day. Only videos can be posted, and new creators' shorts wait for admin approval.
+- **Statuses.** Statuses come from **YidStatus.com**. Lichtig links to it, because YidStatus doesn't allow other sites to embed or copy its content. Kids mode and parental controls hide this section.
+- **Content with women is hidden by default.** Signed-in users can choose to show videos where women appear or sing (Account → Content preferences). A parental lock always wins.
+- **Parental controls (PIN-locked).** Options are Kids mode, hide music, automatically hide music during Sefirah and the Three Weeks, always hide women, hide news, hide shorts, hide Statuses, and a daily time limit. The settings stay locked on the device even after signing out.
+- **Shabbos & Yom Tov mode.** The whole site closes from candle lighting to havdalah for the chosen city. The home page shows the Hebrew date and the next candle-lighting time (in that city's time zone).
+- **Premium subscription.** Premium removes all ads and allows downloading shorts and Lichtig-hosted videos. It works with Stripe. Until Stripe is connected, the admin can turn on Premium by hand.
 - **Kosher ads.** Only ads the admin uploads are shown, with scheduling, weighting and view and click counts. Premium members see none, and ads are never placed over YouTube videos.
+- **English / Yiddish.** The switch translates the interface without flipping the layout.
 - **Admin panel.** Sections cover the dashboard, adding YouTube videos by link, YouTube search, the review queue, approved channels with auto-sync, ads, users, reports and settings.
 
 ## Important limits (YouTube rules)

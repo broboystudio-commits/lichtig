@@ -98,7 +98,7 @@ async function dashboard(body) {
     const { stats: s, youtubeApi, payments } = await api('/admin/stats');
     const tile = (label, value, href, accent) => h('a', { class: 'stat' + (accent ? ' accent' : ''), href }, h('strong', {}, fmtCount(value)), h('span', {}, label));
     const todo = [];
-    if (s.pending_statuses) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('inbox', 18), t('{n} statuses waiting for review', { n: s.pending_statuses })));
+    if (s.pending_statuses) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('inbox', 18), t('{n} shorts waiting for review', { n: s.pending_statuses })));
     if (s.pending_videos) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('tv', 18), t('{n} videos waiting for review', { n: s.pending_videos })));
     if (s.open_reports) todo.push(h('a', { class: 'todo', href: '#/admin/reports' }, icon('flag', 18), t('{n} open reports', { n: s.open_reports })));
     fill(
@@ -107,7 +107,7 @@ async function dashboard(body) {
         'div',
         { class: 'stats-grid' },
         tile(t('Videos live'), s.videos, '#/admin/videos'),
-        tile(t('Statuses live'), s.statuses, '#/admin/review'),
+        tile(t('Shorts live'), s.statuses, '#/admin/review'),
         tile(t('Waiting for review'), s.pending_statuses + s.pending_videos, '#/admin/review', s.pending_statuses + s.pending_videos > 0),
         tile(t('Open reports'), s.open_reports, '#/admin/reports', s.open_reports > 0),
         tile(t('Users'), s.users, '#/admin/users'),
@@ -339,11 +339,11 @@ async function videos(body) {
 async function review(body) {
   const statusesBox = h('div', { class: 'review-grid' }, spinner());
   const videosBox = h('div', { class: 'admin-list' }, spinner());
-  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Statuses waiting for review')), statusesBox), h('div', { class: 'card' }, h('h2', {}, t('Videos waiting for review')), h('p', { class: 'muted small' }, t('New uploads from synced channels land here unless the channel is trusted.')), videosBox));
+  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Shorts waiting for review')), statusesBox), h('div', { class: 'card' }, h('h2', {}, t('Videos waiting for review')), h('p', { class: 'muted small' }, t('New uploads from synced channels land here unless the channel is trusted.')), videosBox));
 
   try {
     const { statuses } = await api('/admin/statuses?status=pending');
-    if (!statuses.length) fill(statusesBox, h('p', { class: 'muted' }, t('No statuses waiting.')));
+    if (!statuses.length) fill(statusesBox, h('p', { class: 'muted' }, t('No shorts waiting.')));
     else
       fill(
         statusesBox,
@@ -382,7 +382,7 @@ async function review(body) {
               'div',
               { class: 'row wrap' },
               h('button', { type: 'button', class: 'btn small primary', onclick: () => decide('published') }, icon('check', 16), t('Approve')),
-              s.user.verified ? null : h('button', { type: 'button', class: 'btn small ghost', onclick: () => decide('published', true), title: t('Future statuses from this creator go live without review') }, t('Approve & trust creator')),
+              s.user.verified ? null : h('button', { type: 'button', class: 'btn small ghost', onclick: () => decide('published', true), title: t('Future shorts from this creator go live without review') }, t('Approve & trust creator')),
               h('button', { type: 'button', class: 'btn small danger', onclick: () => decide('rejected') }, t('Reject')),
             ),
           );
@@ -513,7 +513,7 @@ async function ads(body) {
   const file = h('input', { type: 'file', id: 'ad-file', class: 'input', accept: 'image/jpeg,image/png,image/webp,image/gif,video/mp4' });
   const title = h('input', { class: 'input', id: 'ad-title', maxlength: '120', dir: 'auto' });
   const link = h('input', { class: 'input', id: 'ad-link', placeholder: 'https://' });
-  const placement = h('select', { class: 'input', id: 'ad-place' }, [['banner', t('Banner (home page)')], ['watch', t('Under the video player')], ['status', t('Between statuses & shorts (full screen)')]].map(([v, l]) => h('option', { value: v }, l)));
+  const placement = h('select', { class: 'input', id: 'ad-place' }, [['banner', t('Banner (home page)')], ['watch', t('Under the video player')], ['status', t('Between shorts (full screen)')]].map(([v, l]) => h('option', { value: v }, l)));
   const starts = h('input', { class: 'input', type: 'date', id: 'ad-start' });
   const ends = h('input', { class: 'input', type: 'date', id: 'ad-end' });
   const weight = h('input', { class: 'input', type: 'number', min: '1', max: '10', value: '1', id: 'ad-weight' });
@@ -524,7 +524,7 @@ async function ads(body) {
     h('h2', {}, t('Add a kosher ad')),
     h('p', { class: 'muted small' }, t('Only ads you add here are ever shown. Premium members never see ads. Ads are never placed over YouTube videos.')),
     h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'ad-title' }, t('Ad name')), title), h('div', { class: 'field' }, h('label', { for: 'ad-link' }, t('Link (where it goes when tapped)')), link)),
-    h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'ad-file' }, t('Image or video')), file, h('small', { class: 'muted' }, t('Banner: wide image (about 1200×240). Status: tall image (about 1080×1920).'))), h('div', { class: 'field' }, h('label', { for: 'ad-place' }, t('Where to show it')), placement)),
+    h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'ad-file' }, t('Image or video')), file, h('small', { class: 'muted' }, t('Banner: wide image (about 1200×240). Shorts: tall image (about 1080×1920).'))), h('div', { class: 'field' }, h('label', { for: 'ad-place' }, t('Where to show it')), placement)),
     h('div', { class: 'row three' }, h('div', { class: 'field' }, h('label', { for: 'ad-start' }, t('Start date (optional)')), starts), h('div', { class: 'field' }, h('label', { for: 'ad-end' }, t('End date (optional)')), ends), h('div', { class: 'field' }, h('label', { for: 'ad-weight' }, t('How often (1–10)')), weight)),
     h('div', { class: 'row-end' }, save),
   );
@@ -553,7 +553,7 @@ async function ads(body) {
       save.textContent = t('Add ad');
     }
   });
-  const placeLabel = { banner: t('Banner'), watch: t('Under player'), status: t('Statuses & shorts') };
+  const placeLabel = { banner: t('Banner'), watch: t('Under player'), status: t('Shorts') };
   async function load() {
     try {
       const { ads: list2 } = await api('/admin/ads');
@@ -640,7 +640,7 @@ async function users(body) {
             'div',
             { class: 'admin-row' },
             avatar(u, 40),
-            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: '#/u/' + encodeURIComponent(u.username) }, u.displayName), h('span', { class: 'muted small' }, '@' + u.username + ' · ' + t('joined {time}', { time: timeAgo(u.createdAt) }) + ' · ' + t('{n} statuses', { n: u.statusCount }))),
+            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: '#/u/' + encodeURIComponent(u.username) }, u.displayName), h('span', { class: 'muted small' }, '@' + u.username + ' · ' + t('joined {time}', { time: timeAgo(u.createdAt) }) + ' · ' + t('{n} shorts', { n: u.statusCount }))),
             h('div', { class: 'row-actions wrap' }, toggle('verified', t('Trusted creator'), u.verified), toggle('premium', t('Premium'), u.premium), toggle('role', t('Admin'), u.role === 'admin'), toggle('banned', t('Banned'), u.banned)),
           );
         }),
@@ -649,7 +649,7 @@ async function users(body) {
       fill(list, h('p', { class: 'muted' }, err.message));
     }
   }
-  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Users')), h('p', { class: 'muted small' }, t('Trusted creators’ statuses go live without review. Premium removes ads and allows downloads.')), q, list));
+  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Users')), h('p', { class: 'muted small' }, t('Trusted creators’ shorts go live without review. Premium removes ads and allows downloads.')), q, list));
   load();
 }
 

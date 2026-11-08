@@ -15,7 +15,8 @@ export const FILTER_KEYS = [
   'hideWomenSinging',
   'hideWomenImages',
   'hideNews',
-  'hideStatuses',
+  'hideStatuses', // the YidStatus section (external content we can't filter)
+  'hideShorts',
 ];
 
 export function sanitizeFilters(input = {}) {
@@ -57,12 +58,20 @@ export function clearLock(res) {
   res.clearCookie(LOCK_COOKIE, { path: '/' });
 }
 
-/** Combine account and device restrictions: anything either one hides stays hidden. */
+/**
+ * Combine account and device restrictions: anything either one hides stays hidden.
+ * Content with women is hidden by default; only a signed-in user can opt in, and a
+ * parental lock always wins.
+ */
 export function effectiveFilters(req, settings) {
   const account = req.user?.parental?.enabled ? req.user.parental : null;
   const device = readLock(req);
   const f = { locked: !!(account || device) };
   for (const k of FILTER_KEYS) f[k] = !!(account?.[k] || device?.filters?.[k]);
+  f.womenImagesLocked = f.hideWomenImages;
+  f.womenSingingLocked = f.hideWomenSinging;
+  if (!req.user?.show_women_images) f.hideWomenImages = true;
+  if (!req.user?.show_women_singing) f.hideWomenSinging = true;
   const limits = [account?.dailyLimitMin, device?.filters?.dailyLimitMin].filter((n) => n > 0);
   f.dailyLimitMin = limits.length ? Math.min(...limits) : 0;
   const period = musicPeriod();
@@ -83,8 +92,8 @@ export function videoConditions(f, a = 'v') {
 }
 
 export function statusConditions(f, a = 's') {
-  const c = [`${a}.status = 'published'`];
-  if (f.hideStatuses) c.push('FALSE');
+  const c = [`${a}.status = 'published'`, `${a}.kind = 'video'`];
+  if (f.hideShorts) c.push('FALSE');
   if (f.kidsMode) c.push(`${a}.kid_safe`);
   if (f.musicBlocked) c.push(`NOT ${a}.has_music`);
   if (f.hideWomenSinging) c.push(`NOT ${a}.women_singing`);

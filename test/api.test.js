@@ -96,19 +96,21 @@ test('signup and login validate input', async () => {
   assert.equal((await client()('POST', '/api/auth/login', { username: 'yossi', password: 'wrongpass1' })).status, 401);
 });
 
-test('new creators’ statuses wait for review; trusted creators publish directly', async () => {
+const shortForm = (caption = '') => {
+  const f = new FormData();
+  f.append('body', caption);
+  f.append('file', new Blob([fs.readFileSync(path.join(SEED, 'short-gamzu.mp4'))], { type: 'video/mp4' }), 'clip.mp4');
+  return f;
+};
+
+test('new creators’ shorts wait for review; trusted creators publish directly', async () => {
   const c = await signup('newcreator');
-  const r = await c('POST', '/api/statuses', (() => {
-    const f = new FormData();
-    f.append('kind', 'text');
-    f.append('body', 'Gut voch!');
-    return f;
-  })());
-  assert.equal(r.status, 201);
+  const r = await c('POST', '/api/statuses', shortForm('Gut voch!'));
+  assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.equal(r.data.pending, true);
   const guest = client();
   const list = await guest('GET', '/api/statuses/by/newcreator?from=2000-01-01T00:00:00Z');
-  assert.equal(list.data.statuses.length, 0, 'pending status is not public');
+  assert.equal(list.data.statuses.length, 0, 'pending short is not public');
 
   const a = await admin();
   const pending = await a('GET', '/api/admin/statuses?status=pending');
@@ -117,27 +119,40 @@ test('new creators’ statuses wait for review; trusted creators publish directl
   assert.equal((await a('PATCH', `/api/admin/statuses/${mine.id}`, { status: 'published', verifyCreator: true })).status, 200);
   const after2 = await guest('GET', '/api/statuses/by/newcreator?from=2000-01-01T00:00:00Z');
   assert.equal(after2.data.statuses.length, 1);
-
-  const f2 = new FormData();
-  f2.append('kind', 'text');
-  f2.append('body', 'Now trusted');
-  assert.equal((await c('POST', '/api/statuses', f2)).data.pending, false);
+  assert.equal((await c('POST', '/api/statuses', shortForm('Now trusted'))).data.pending, false);
 });
 
-test('photo and video statuses must be real media', async () => {
+test('shorts must be real videos (no text or photo statuses)', async () => {
   const c = await signup('mediauser');
-  const bad = new FormData();
-  bad.append('kind', 'video');
-  bad.append('file', new Blob(['not a video']), 'x.mp4');
-  assert.equal((await c('POST', '/api/statuses', bad)).status, 400);
-  const good = new FormData();
-  good.append('kind', 'image');
-  good.append('file', new Blob([fs.readFileSync(path.join(SEED, 'status-gamzu.jpg'))]), 'a.jpg');
-  const r = await c('POST', '/api/statuses', good);
+  const text = new FormData();
+  text.append('kind', 'text');
+  text.append('body', 'just text');
+  assert.equal((await c('POST', '/api/statuses', text)).status, 400);
+  const photo = new FormData();
+  photo.append('file', new Blob([fs.readFileSync(path.join(SEED, 'ad-banner.jpg'))]), 'a.jpg');
+  assert.equal((await c('POST', '/api/statuses', photo)).status, 400);
+  const fake = new FormData();
+  fake.append('file', new Blob(['not a video']), 'x.mp4');
+  assert.equal((await c('POST', '/api/statuses', fake)).status, 400);
+  const r = await c('POST', '/api/statuses', shortForm());
   assert.equal(r.status, 201);
   const media = await fetch(base + r.data.status.mediaUrl, { headers: { range: 'bytes=0-99' } });
   assert.equal(media.status, 206);
   assert.equal((await media.arrayBuffer()).byteLength, 100);
+});
+
+test('content with women is hidden by default; signed-in users can opt in; parental lock wins', async () => {
+  const hasWomenVideo = (home) => home.data.sections.flatMap((s) => s.videos).some((v) => v.flags.womenImages);
+  assert.equal(hasWomenVideo(await client()('GET', '/api/home')), false, 'hidden for guests');
+  const u = await signup('optinuser');
+  assert.equal(hasWomenVideo(await u('GET', '/api/home')), false, 'hidden for new accounts');
+  const me = await u('PATCH', '/api/me', { showWomenImages: true });
+  assert.equal(me.data.user.showWomenImages, true);
+  assert.equal(hasWomenVideo(await u('GET', '/api/home')), true, 'shown after opting in');
+  await u('POST', '/api/parental', { newPin: '9876', settings: { hideWomenImages: true } });
+  assert.equal(hasWomenVideo(await u('GET', '/api/home')), false, 'parental lock overrides the preference');
+  const cfg = await u('GET', '/api/config');
+  assert.equal(cfg.data.filters.womenImagesLocked, true);
 });
 
 test('parental controls filter content, need a PIN, and stay on the device after sign-out', async () => {

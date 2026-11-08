@@ -1,5 +1,5 @@
 // Status viewer (WhatsApp-style stories) and the Shorts vertical feed.
-import { h, fill, icon, api, t, lang, state, avatar, verifiedBadge, timeAgo, toast, openSheet, bus } from './core.js';
+import { h, fill, icon, api, t, state, avatar, verifiedBadge, timeAgo, toast, openSheet, bus } from './core.js';
 
 // ---------- seen tracking (guests keep it on the device) ----------
 const SEEN_KEY = 'lt_seen';
@@ -110,7 +110,7 @@ export function openStories({ creators, start = 0, from, to, onClose, startStatu
   const nextZone = h('button', { type: 'button', class: 'story-zone next', 'aria-label': t('Next') });
   const frame = h(
     'div',
-    { class: 'story', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('Status') },
+    { class: 'story', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('Short') },
     stage,
     h('div', { class: 'story-top' }, bars, h('div', { class: 'story-head' }, headUser, h('div', { class: 'story-head-actions' }, soundBtn, closeBtn))),
     prevZone,
@@ -149,8 +149,8 @@ export function openStories({ creators, start = 0, from, to, onClose, startStatu
     if (e.key === 'Escape') {
       e.stopPropagation();
       close();
-    } else if (e.key === 'ArrowRight') (lang.current === 'yi' ? prev : next)();
-    else if (e.key === 'ArrowLeft') (lang.current === 'yi' ? next : prev)();
+    } else if (e.key === 'ArrowRight') next();
+    else if (e.key === 'ArrowLeft') prev();
     else if (e.key === ' ') {
       e.preventDefault();
       paused = !paused;
@@ -513,9 +513,9 @@ export function createShorts(container, { startId } = {}) {
       if (list.length) lastId = Math.min(...res.shorts.map((x) => x.id));
       done = res.done;
       if (!slides.length) {
-        scroller.append(h('div', { class: 'short empty-short' }, h('div', { class: 'empty light' }, h('h3', {}, t('No shorts yet')), h('p', {}, t('Video statuses from creators show up here.')))));
+        scroller.append(h('div', { class: 'short empty-short' }, h('div', { class: 'empty light' }, h('h3', {}, t('No shorts yet')), h('p', {}, t('Shorts from creators show up here.')))));
       } else if (done) {
-        scroller.append(h('div', { class: 'short empty-short' }, h('div', { class: 'empty light' }, h('h3', {}, t("You're all caught up")), h('a', { class: 'btn primary', href: '#/status' }, t('See all statuses')))));
+        scroller.append(h('div', { class: 'short empty-short' }, h('div', { class: 'empty light' }, h('h3', {}, t("You're all caught up")), h('a', { class: 'btn primary', href: '#/shorts/creators' }, t('Browse by creator')))));
       }
     } catch (err) {
       toast(err.message, true);

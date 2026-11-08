@@ -50,7 +50,7 @@ function renderTopbar() {
       h('a', { class: 'icon-btn mobile-only', href: '#/search', 'aria-label': t('Search') }, icon('search', 20)),
       langBtn,
       shield,
-      me ? h('a', { class: 'btn primary small hide-mobile', href: '#/post' }, icon('plus', 18), t('Post status')) : null,
+      me ? h('a', { class: 'btn primary small hide-mobile', href: '#/post' }, icon('plus', 18), t('Post a short')) : null,
       me
         ? h('a', { class: 'me-link', href: '#/account', 'aria-label': t('Your account') }, avatar(me, 36))
         : h('a', { class: 'btn primary small', href: '#/login' }, t('Sign in')),
@@ -60,8 +60,8 @@ function renderTopbar() {
 
 const NAV = () => [
   ['home', '#/', 'Home', 'home'],
-  ['status', '#/status', 'Statuses', 'status'],
   ['shorts', '#/shorts', 'Shorts', 'shorts'],
+  ['status', '#/status', 'Statuses', 'status'],
   ['saved', '#/saved', 'Saved', 'bookmark'],
   ['premium', '#/premium', 'Premium', 'crown'],
 ];
@@ -91,16 +91,15 @@ function renderSidebar(active) {
 }
 
 function renderBottomNav(active) {
-  const items = [
-    ['home', '#/', 'Home', 'home'],
-    ['status', '#/status', 'Status', 'status'],
-    ['shorts', '#/shorts', 'Shorts', 'shorts'],
-    ['saved', '#/saved', 'Saved', 'bookmark'],
-    ['account', state.me ? '#/account' : '#/login', 'Me', 'user'],
-  ];
+  const item = ([key, href, label, ic]) =>
+    h('a', { href, class: 'bn-item', 'aria-current': active === key ? 'page' : null }, icon(ic, 22), h('span', {}, t(label)));
   fill(
     bottomNav,
-    items.map(([key, href, label, ic]) => h('a', { href, class: 'bn-item', 'aria-current': active === key ? 'page' : null }, icon(ic, 22), h('span', {}, t(label)))),
+    item(['home', '#/', 'Home', 'home']),
+    item(['shorts', '#/shorts', 'Shorts', 'shorts']),
+    h('a', { href: state.me ? '#/post' : '#/login', class: 'bn-post', 'aria-label': t('Post a short') }, icon('plus', 24, 2.4)),
+    item(['status', '#/status', 'Statuses', 'status']),
+    item(['saved', '#/saved', 'Saved', 'bookmark']),
   );
 }
 
@@ -171,13 +170,25 @@ function unseenCount(c) {
   return c.ids.filter((id) => !isSeenLocally(id)).length;
 }
 
-function storyBubble(c, onOpen) {
-  const unseen = unseenCount(c) > 0;
+const yidStatusAllowed = () => !state.config.filters.kidsMode && !state.config.filters.hideStatuses;
+
+function yidStatusCard() {
+  if (!yidStatusAllowed()) return null;
   return h(
-    'button',
-    { type: 'button', class: 'story-bubble', onclick: onOpen, 'aria-label': t('{name}: {n} statuses', { name: c.user.displayName, n: c.count }) },
-    avatar(c.user, 64, { ring: unseen ? 'new' : 'seen' }),
-    h('span', { class: 'bubble-name', dir: 'auto' }, c.user.displayName),
+    'a',
+    { class: 'ys-card', href: '#/status' },
+    h('span', { class: 'ys-badge' }, icon('status', 22)),
+    h('span', { class: 'ys-text' }, h('strong', {}, t('Today’s statuses')), h('span', {}, t('From YidStatus.com'))),
+    icon('next', 18),
+  );
+}
+
+function shortsTabs(active, dark = false) {
+  return h(
+    'div',
+    { class: 'shorts-tabs' + (dark ? ' dark' : ''), role: 'tablist', 'aria-label': t('Shorts') },
+    h('a', { href: '#/shorts', role: 'tab', 'aria-selected': String(active === 'feed') }, t('Feed')),
+    h('a', { href: '#/shorts/creators', role: 'tab', 'aria-selected': String(active === 'creators') }, t('Creators')),
   );
 }
 
@@ -211,8 +222,6 @@ function renderHome() {
       ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'candle' }, icon('candle', 16), t('Candle lighting {time}', { time: fmtTime(cfg.closed.nextCandleLighting, cfg.closed.tzid) }), ` (${cfg.closed.city})`)]
       : null,
   );
-
-  const stories = h('div', { class: 'stories-row', 'aria-label': t('Statuses') }, spinner());
   const chips = h(
     'div',
     { class: 'chips', role: 'list' },
@@ -223,38 +232,19 @@ function renderHome() {
   append(page, [
     cfg.announcement ? h('div', { class: 'announcement', dir: 'auto' }, icon('megaphone', 18), cfg.announcement) : null,
     dateStrip,
-    h('section', { class: 'stories-section' }, sectionHead(t('Statuses'), '#/status'), stories),
+    shortsTeaser(),
     chips,
     body,
   ]);
-
-  // statuses row (last 24 hours)
-  const range = { from: new Date(Date.now() - 24 * 3600 * 1000), to: new Date(Date.now() + 60000) };
-  api(`/statuses?from=${range.from.toISOString()}&to=${range.to.toISOString()}`)
-    .then(({ creators }) => {
-      const add = state.me
-        ? h('a', { class: 'story-bubble add', href: '#/post' }, h('span', { class: 'add-ring' }, icon('plus', 26)), h('span', { class: 'bubble-name' }, t('Your status')))
-        : null;
-      if (!creators.length) return fill(stories, add, h('p', { class: 'muted small pad' }, t('No statuses in the last day yet.')));
-      const sorted = [...creators].sort((a, b) => (unseenCount(b) > 0) - (unseenCount(a) > 0));
-      fill(
-        stories,
-        add,
-        sorted.map((c, i) => storyBubble(c, () => openStories({ creators: sorted, start: i, ...range, onClose: () => route() }))),
-      );
-    })
-    .catch(() => fill(stories, h('p', { class: 'muted small pad' }, t('Statuses are hidden.'))));
 
   api('/home')
     .then((d) => {
       const blocks = [];
       if (d.ads && d.ads[0]) blocks.push(adBanner(d.ads[0]));
       if (d.featured.length) {
-        blocks.push(
-          h('section', { class: 'featured' }, sectionHead(t('Featured')), h('div', { class: 'hero-row' }, d.featured.map((v) => videoCard(v, { size: 'large' })))),
-        );
+        blocks.push(h('section', { class: 'featured' }, sectionHead(t('Featured')), h('div', { class: 'hero-row' }, d.featured.map((v) => videoCard(v, { size: 'large' })))));
       }
-      blocks.push(shortsTeaser());
+      blocks.push(yidStatusCard());
       d.sections.forEach((s, i) => {
         blocks.push(h('section', { class: 'row-section' }, sectionHead(lang.current === 'yi' ? s.nameYi : s.nameEn, '#/c/' + s.slug), h('div', { class: 'card-row' }, s.videos.map((v) => videoCard(v)))));
         if (i === 1 && d.ads && d.ads[1]) blocks.push(adBanner(d.ads[1], { compact: true }));
@@ -272,18 +262,28 @@ function append(el, children) {
 }
 
 function shortsTeaser() {
+  if (state.config.filters.hideShorts) return null;
   const row = h('div', { class: 'shorts-row' }, spinner());
-  const sec = h('section', { class: 'row-section' }, sectionHead(t('Shorts'), '#/shorts'), row);
+  const sec = h('section', { class: 'row-section shorts-section' }, sectionHead(t('Shorts'), '#/shorts'), row);
   api('/shorts')
     .then(({ shorts }) => {
-      if (!shorts.length) return sec.remove();
+      const post = state.me
+        ? h('a', { class: 'short-card post-card', href: '#/post' }, h('span', { class: 'post-card-inner' }, h('span', { class: 'add-ring' }, icon('plus', 26)), h('strong', {}, t('Post a short'))))
+        : null;
+      if (!shorts.length && !post) return sec.remove();
       fill(
         row,
-        shorts.slice(0, 10).map((s) => {
+        post,
+        shorts.slice(0, 12).map((s) => {
           const v = h('video', { preload: 'metadata', muted: true, playsinline: true, tabindex: '-1', 'aria-hidden': 'true' });
           v.muted = true;
           v.src = s.mediaUrl + '#t=0.5';
-          return h('a', { class: 'short-card', href: '#/shorts?id=' + s.id, 'aria-label': `${s.user.displayName}: ${s.body || t('Short')}` }, v, h('span', { class: 'short-card-info' }, avatar(s.user, 24), h('span', { dir: 'auto' }, s.body || s.user.displayName)));
+          return h(
+            'a',
+            { class: 'short-card', href: '#/shorts?id=' + s.id, 'aria-label': `${s.user.displayName}: ${s.body || t('Short')}` },
+            v,
+            h('span', { class: 'short-card-info' }, avatar(s.user, 24), h('span', { dir: 'auto' }, s.body || s.user.displayName)),
+          );
         }),
       );
     })
@@ -363,7 +363,7 @@ function renderSaved() {
         sectionHead(t('Favorite creators')),
         d.creators.length
           ? h('div', { class: 'creator-row' }, d.creators.map((u) => h('a', { class: 'creator-chip', href: '#/u/' + encodeURIComponent(u.username) }, avatar(u, 40), h('span', { dir: 'auto' }, u.displayName), verifiedBadge(u))))
-          : h('p', { class: 'muted' }, t('Tap “Add to favorites” on a creator’s status to see them here first.')),
+          : h('p', { class: 'muted' }, t('Tap “Add to favorites” on a creator’s short to see them here first.')),
         sectionHead(t('Saved videos')),
         d.videos.length ? h('div', { class: 'grid' }, d.videos.map((v) => videoCard(v))) : h('p', { class: 'muted' }, t('Tap Save under any video to keep it here.')),
       );
@@ -374,22 +374,156 @@ function renderSaved() {
 // =====================================================================
 // Watch
 // =====================================================================
+let ytApiPromise = null;
+function loadYouTubeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (!ytApiPromise) {
+    ytApiPromise = new Promise((resolve, reject) => {
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        if (prev) prev();
+        resolve(window.YT);
+      };
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      s.async = true;
+      s.onerror = () => {
+        ytApiPromise = null;
+        reject(new Error('YouTube player failed to load'));
+      };
+      document.head.append(s);
+      setTimeout(() => reject(new Error('YouTube player timed out')), 9000);
+    });
+  }
+  return ytApiPromise;
+}
+
+/**
+ * A Lichtig-branded cover for YouTube videos: our own thumbnail, title and play button.
+ * YouTube's player only loads (and starts) once the viewer taps play, and our "Up next"
+ * screen replaces YouTube's end-of-video suggestions.
+ */
+function youTubePlayer(v, related) {
+  const box = h('div', { class: 'player yt-facade' });
+  const poster = h('img', { class: 'facade-poster', src: `https://i.ytimg.com/vi/${v.ytId}/maxresdefault.jpg`, alt: '' });
+  poster.addEventListener('error', () => {
+    if (poster.dataset.fallback) return;
+    poster.dataset.fallback = '1';
+    poster.src = `https://i.ytimg.com/vi/${v.ytId}/hqdefault.jpg`;
+  });
+  const playBtn = h('button', { type: 'button', class: 'facade-play', 'aria-label': t('Play video') }, h('span', { class: 'facade-btn' }, icon('play', 34)));
+  const shade = h(
+    'div',
+    { class: 'facade-shade', 'aria-hidden': 'true' },
+    h('span', { class: 'facade-brand' }, logo(20), h('span', {}, state.config.siteName)),
+    h('span', { class: 'facade-title', dir: 'auto' }, v.title),
+  );
+  fill(box, poster, shade, playBtn);
+  let player = null;
+  let revealTimer = null;
+
+  const iframeFallback = () => {
+    clearTimeout(revealTimer);
+    const frame = h('iframe', {
+      src: `https://www.youtube-nocookie.com/embed/${v.ytId}?autoplay=1&rel=0&playsinline=1&iv_load_policy=3&hl=${lang.current === 'yi' ? 'yi' : 'en'}`,
+      title: v.title,
+      allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+      referrerpolicy: 'strict-origin-when-cross-origin',
+      allowfullscreen: true,
+    });
+    fill(box, frame);
+    box.classList.add('playing');
+  };
+
+  const showEnd = () => {
+    const next = related[0];
+    const overlay = h(
+      'div',
+      { class: 'end-overlay' },
+      next
+        ? h('a', { class: 'end-next', href: '#/v/' + next.id }, h('span', { class: 'end-label' }, t('Up next')), next.thumbnail ? h('img', { src: next.thumbnail, alt: '' }) : null, h('strong', { dir: 'auto' }, next.title))
+        : null,
+      h(
+        'div',
+        { class: 'end-actions' },
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'btn light small',
+            onclick: () => {
+              overlay.remove();
+              player.seekTo(0, true);
+              player.playVideo();
+            },
+          },
+          icon('refresh', 16),
+          t('Watch again'),
+        ),
+        next ? h('a', { class: 'btn gold small', href: '#/v/' + next.id }, icon('play', 14), t('Play next')) : null,
+      ),
+    );
+    box.append(overlay);
+  };
+
+  playBtn.addEventListener('click', async () => {
+    box.classList.add('loading');
+    const holder = h('div', { class: 'yt-holder' });
+    box.prepend(holder);
+    // If YouTube needs one more tap (some phones block autoplay), reveal its player after a moment.
+    revealTimer = setTimeout(() => box.classList.add('playing'), 3500);
+    try {
+      const YT = await loadYouTubeApi();
+      player = new YT.Player(holder, {
+        videoId: v.ytId,
+        host: 'https://www.youtube-nocookie.com',
+        playerVars: { autoplay: 1, rel: 0, playsinline: 1, iv_load_policy: 3, modestbranding: 1, hl: lang.current === 'yi' ? 'yi' : 'en', origin: location.origin },
+        events: {
+          onReady: (e) => e.target.playVideo(),
+          onStateChange: (e) => {
+            if (e.data === 1) {
+              clearTimeout(revealTimer);
+              box.classList.add('playing');
+              box.querySelector('.end-overlay')?.remove();
+            }
+            if (e.data === 0) showEnd();
+          },
+          onError: iframeFallback,
+        },
+      });
+    } catch {
+      iframeFallback();
+    }
+  });
+
+  return {
+    el: box,
+    destroy() {
+      clearTimeout(revealTimer);
+      try {
+        if (player && player.destroy) player.destroy();
+      } catch {
+        /* already gone */
+      }
+    },
+  };
+}
+
 function renderWatch(id) {
   const page = h('div', { class: 'page watch' }, spinner());
   fill(main, page);
+  let ytp = null;
   api('/videos/' + id)
     .then((d) => {
       const v = d.video;
       api(`/videos/${id}/view`, { method: 'POST' }).catch(() => {});
-      const player = v.source === 'youtube'
-        ? h('iframe', {
-            src: `https://www.youtube-nocookie.com/embed/${v.ytId}?rel=0&modestbranding=1&playsinline=1&hl=${lang.current === 'yi' ? 'yi' : 'en'}`,
-            title: v.title,
-            allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
-            referrerpolicy: 'strict-origin-when-cross-origin',
-            allowfullscreen: true,
-          })
-        : h('video', { src: v.mediaUrl, controls: true, autoplay: true, playsinline: true, controlslist: d.canDownload ? null : 'nodownload' });
+      let player;
+      if (v.source === 'youtube') {
+        ytp = youTubePlayer(v, d.related);
+        player = ytp.el;
+      } else {
+        player = h('div', { class: 'player' }, h('video', { src: v.mediaUrl, controls: true, autoplay: true, playsinline: true, controlslist: d.canDownload ? null : 'nodownload' }));
+      }
 
       let liked = v.liked;
       let saved = v.saved;
@@ -441,18 +575,14 @@ function renderWatch(id) {
         ? h('button', { type: 'button', class: 'act-btn', onclick: () => downloadMedia(v.mediaUrl) }, icon('download', 20), h('span', {}, t('Download')), state.me?.premium ? null : icon('crown', 14))
         : null;
       const reportBtn = h('button', { type: 'button', class: 'act-btn', onclick: () => reportContent('video', v.id) }, icon('flag', 20), h('span', {}, t('Report')));
-
-      const desc = v.description
-        ? h('details', { class: 'desc' }, h('summary', {}, t('Description')), h('p', { dir: 'auto' }, v.description))
-        : null;
+      const desc = v.description ? h('details', { class: 'desc' }, h('summary', {}, t('Description')), h('p', { dir: 'auto' }, v.description)) : null;
 
       fill(
         page,
         h(
           'div',
           { class: 'watch-main' },
-          h('div', { class: 'player' }, player),
-          v.source === 'youtube' ? h('p', { class: 'yt-note' }, t('Plays in YouTube’s player. YouTube may show its own ads on some videos.')) : null,
+          player,
           h('h1', { class: 'watch-title', dir: 'auto' }, v.title),
           h(
             'div',
@@ -469,14 +599,15 @@ function renderWatch(id) {
     .catch((err) => {
       fill(page, err.code === 'filtered' ? emptyState(t('Hidden by parental controls'), t('This video is not available with your current settings.'), h('a', { class: 'btn ghost', href: '#/' }, t('Back to home'))) : emptyState(t('Video not found'), err.message, h('a', { class: 'btn ghost', href: '#/' }, t('Back to home'))));
     });
+  return () => ytp && ytp.destroy();
 }
 
 // =====================================================================
 // Statuses (yidstatus-style)
 // =====================================================================
-function renderStatuses(params) {
+function renderShortsCreators(params) {
   let day = Math.min(7, Math.max(0, Number(params.get('day')) || 0));
-  let tab = params.get('tab') === 'favorites' ? 'favorites' : 'all';
+  const tab = params.get('tab') === 'favorites' ? 'favorites' : 'all';
   const list = h('div', { class: 'status-list' }, spinner());
   const dayNames = (d) => (lang.current === 'yi' ? YI_DAYS_SHORT[new Date(d).getDay()] : new Date(d).toLocaleDateString(undefined, { weekday: 'short' }));
   const days = h(
@@ -486,47 +617,39 @@ function renderStatuses(params) {
     Array.from({ length: 8 }, (_, i) => 7 - i).map((ago) => {
       const { from } = dayRange(ago);
       const label = ago === 0 ? t('Today') : ago === 1 ? t('Yest') : dayNames(from);
-      return h(
-        'a',
-        { class: 'day' + (ago === day ? ' on' : ''), href: `#/status?day=${ago}&tab=${tab}`, role: 'tab', 'aria-selected': String(ago === day) },
-        h('span', {}, label),
-        h('strong', {}, from.getDate()),
-      );
+      return h('a', { class: 'day' + (ago === day ? ' on' : ''), href: `#/shorts/creators?day=${ago}&tab=${tab}`, role: 'tab', 'aria-selected': String(ago === day) }, h('span', {}, label), h('strong', {}, from.getDate()));
     }),
   );
   const tabs = h(
     'div',
     { class: 'pill-tabs' },
-    h('a', { class: 'pill' + (tab === 'all' ? ' on' : ''), href: `#/status?day=${day}&tab=all` }, t('All creators')),
-    h('a', { class: 'pill' + (tab === 'favorites' ? ' on' : ''), href: `#/status?day=${day}&tab=favorites` }, t('Favorites')),
+    h('a', { class: 'pill' + (tab === 'all' ? ' on' : ''), href: `#/shorts/creators?day=${day}&tab=all` }, t('All creators')),
+    h('a', { class: 'pill' + (tab === 'favorites' ? ' on' : ''), href: `#/shorts/creators?day=${day}&tab=favorites` }, t('Favorites')),
   );
   fill(
     main,
     h(
       'div',
       { class: 'page statuses' },
-      h('div', { class: 'status-head' }, h('h1', { class: 'page-title' }, t('Statuses')), state.me ? h('a', { class: 'btn primary small', href: '#/post' }, icon('plus', 18), t('Post status')) : null),
+      h('div', { class: 'status-head' }, h('h1', { class: 'page-title' }, t('Shorts')), shortsTabs('creators')),
       days,
       tabs,
-      state.config.filters.hideStatuses ? null : h('a', { class: 'my-status-row', href: state.me ? '#/post' : '#/login' }, h('span', { class: 'add-ring small' }, icon('plus', 20)), h('span', {}, h('strong', {}, t('My status')), h('span', { class: 'muted small' }, state.me ? t('Share a status with the community') : t('Sign in to post a status')))),
+      h('a', { class: 'my-status-row', href: state.me ? '#/post' : '#/login' }, h('span', { class: 'add-ring small' }, icon('plus', 20)), h('span', {}, h('strong', {}, t('Post a short')), h('span', { class: 'muted small' }, state.me ? t('Share a short video with the community') : t('Sign in to post a short')))),
       h('h2', { class: 'list-label' }, t('Recent')),
       list,
     ),
   );
   setTimeout(() => days.querySelector('.day.on')?.scrollIntoView({ inline: 'center', block: 'nearest' }), 0);
   if (tab === 'favorites' && !state.me) return fill(list, needLogin(t('Add creators to your favorites to see them here.')));
-  if (state.config.filters.hideStatuses) return fill(list, emptyState(t('Statuses are hidden'), t('Parental controls on this device hide statuses.')));
+  if (state.config.filters.hideShorts) return fill(list, emptyState(t('Shorts are hidden'), t('Parental controls on this device hide shorts.')));
   const range = dayRange(day);
   api(`/statuses?from=${range.from.toISOString()}&to=${range.to.toISOString()}${tab === 'favorites' ? '&tab=following' : ''}`)
     .then(({ creators }) => {
-      if (!creators.length) {
-        return fill(list, emptyState(tab === 'favorites' ? t('No statuses from your favorites') : t('No statuses on this day'), t('Try another day.')));
-      }
+      if (!creators.length) return fill(list, emptyState(tab === 'favorites' ? t('No shorts from your favorites') : t('No shorts on this day'), t('Try another day.')));
       fill(
         list,
         creators.map((c, i) => {
           const unseen = unseenCount(c);
-          const preview = c.preview.kind === 'text' ? c.preview.text : c.preview.kind === 'image' ? t('Photo') : t('Video');
           return h(
             'button',
             { type: 'button', class: 'status-row', onclick: () => openStories({ creators, start: i, ...range, onClose: () => route() }) },
@@ -535,20 +658,53 @@ function renderStatuses(params) {
               'span',
               { class: 'status-row-body' },
               h('span', { class: 'status-row-top' }, h('strong', { dir: 'auto' }, c.user.displayName), verifiedBadge(c.user), h('span', { class: 'time' }, timeAgo(c.latestAt))),
-              h('span', { class: 'status-row-sub' }, icon(c.preview.kind === 'video' ? 'video' : c.preview.kind === 'image' ? 'image' : 'text', 15), h('span', { dir: 'auto' }, c.count > 1 ? (unseen > 1 ? t('{n} new updates', { n: unseen }) : t('{n} updates', { n: c.count })) : preview)),
+              h('span', { class: 'status-row-sub' }, icon('video', 15), h('span', { dir: 'auto' }, c.count > 1 ? (unseen > 1 ? t('{n} new shorts', { n: unseen }) : t('{n} shorts', { n: c.count })) : c.preview.text || t('Short'))),
             ),
           );
         }),
       );
     })
-    .catch((err) => fill(list, emptyState(t('Could not load statuses'), err.message)));
+    .catch((err) => fill(list, emptyState(t('Could not load shorts'), err.message)));
+}
+
+function renderYidStatus() {
+  if (!yidStatusAllowed()) {
+    return fill(main, h('div', { class: 'page narrow' }, emptyState(t('Statuses are hidden'), t('Parental controls on this device hide the Statuses section.'))));
+  }
+  fill(
+    main,
+    h(
+      'div',
+      { class: 'page narrow' },
+      h('h1', { class: 'page-title' }, t('Statuses')),
+      h(
+        'div',
+        { class: 'card ys-hero' },
+        h('span', { class: 'ys-wordmark', 'aria-hidden': 'true' }, 'yidstatus', h('span', {}, '.com')),
+        h('p', {}, t('Statuses come from YidStatus.com, where heimish creators and businesses post their daily WhatsApp statuses.')),
+        h('a', { class: 'btn primary', href: 'https://yidstatus.com', target: '_blank', rel: 'noopener' }, t('Open YidStatus.com'), icon('link', 16)),
+        h('p', { class: 'muted small' }, t('YidStatus is a separate website. Lichtig’s kosher filters and parental controls don’t apply there.')),
+      ),
+      h(
+        'div',
+        { class: 'card' },
+        h('h2', {}, icon('shorts', 20), ' ', t('Have something to share?')),
+        h('p', { class: 'muted' }, t('Post a short video on Lichtig. Our team reviews every short before it goes live.')),
+        h('a', { class: 'btn ghost', href: state.me ? '#/post' : '#/login' }, icon('plus', 18), t('Post a short')),
+      ),
+    ),
+  );
 }
 
 function renderShorts(params) {
   const box = h('div', { class: 'shorts-page' });
   fill(main, box);
-  if (state.config.filters.hideStatuses) return fill(box, h('div', { class: 'empty light' }, h('h3', {}, t('Shorts are hidden')), h('p', {}, t('Parental controls on this device hide statuses.'))));
-  const s = createShorts(box, { startId: Number(params.get('id')) || null });
+  if (state.config.filters.hideShorts) {
+    return fill(box, h('div', { class: 'empty light' }, h('h3', {}, t('Shorts are hidden')), h('p', {}, t('Parental controls on this device hide shorts.'))));
+  }
+  const feed = h('div', { class: 'shorts-feed' });
+  box.append(feed, shortsTabs('feed', true));
+  const s = createShorts(feed, { startId: Number(params.get('id')) || null });
   return () => s.destroy();
 }
 
@@ -588,9 +744,9 @@ function renderCreator(username) {
           { class: 'creator-hero' },
           avatar(c, 96, { ring: recent.length ? 'new' : null }),
           h('div', {}, h('h1', { dir: 'auto' }, c.displayName, verifiedBadge(c)), h('p', { class: 'muted' }, '@' + c.username, ' · ', followersEl), c.bio ? h('p', { dir: 'auto' }, c.bio) : null),
-          h('div', { class: 'creator-actions' }, c.isMe ? h('a', { class: 'btn primary', href: '#/post' }, icon('plus', 18), t('Post status')) : favBtn, recent.length ? h('button', { type: 'button', class: 'btn ghost', onclick: () => open(null) }, icon('status', 18), t('View statuses')) : null),
+          h('div', { class: 'creator-actions' }, c.isMe ? h('a', { class: 'btn primary', href: '#/post' }, icon('plus', 18), t('Post a short')) : favBtn, recent.length ? h('button', { type: 'button', class: 'btn ghost', onclick: () => open(null) }, icon('status', 18), t('Watch shorts')) : null),
         ),
-        sectionHead(t('Statuses')),
+        sectionHead(t('Shorts')),
         statuses.length
           ? h(
               'div',
@@ -616,7 +772,7 @@ function renderCreator(username) {
                 );
               }),
             )
-          : emptyState(t('No statuses yet'), ''),
+          : emptyState(t('No shorts yet'), ''),
       );
     })
     .catch((err) => fill(page, emptyState(t('Creator not found'), err.message)));
@@ -625,86 +781,49 @@ function renderCreator(username) {
 // =====================================================================
 // Post a status
 // =====================================================================
-const BGS = ['#123b7a', '#0f766e', '#7c2d12', '#6b21a8', '#1f2937', '#b45309', '#be123c', '#065f46'];
-
 function renderPost() {
-  if (!state.me) return fill(main, h('div', { class: 'page narrow' }, needLogin(t('Sign in to post a status.'))));
-  let kind = 'text';
-  let bg = BGS[0];
+  if (!state.me) return fill(main, h('div', { class: 'page narrow' }, needLogin(t('Sign in to post a short.'))));
   let file = null;
-  const textarea = h('textarea', { class: 'status-input', maxlength: '700', rows: '5', placeholder: t('Type a status…'), dir: 'auto', 'aria-label': t('Status text') });
-  const preview = h('div', { class: 'post-preview' });
-  const caption = h('input', { class: 'input', maxlength: '500', placeholder: t('Add a caption (optional)'), dir: 'auto', 'aria-label': t('Caption') });
-  const fileInput = h('input', { type: 'file', class: 'sr-only', id: 'post-file' });
-  const pickBtn = h('label', { class: 'btn ghost', for: 'post-file' }, icon('plus', 18), t('Choose file'));
-  const swatches = h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': t('Background color') });
-  const kindTabs = h('div', { class: 'seg', role: 'tablist' });
+  let previewUrl = null;
+  const preview = h('div', { class: 'post-preview media' });
+  const caption = h('input', { class: 'input', id: 'post-caption', maxlength: '500', placeholder: t('Add a caption (optional)'), dir: 'auto' });
+  const fileInput = h('input', { type: 'file', class: 'sr-only', id: 'post-file', accept: 'video/mp4,video/webm,video/quicktime' });
   const flags = {
     music: h('input', { type: 'checkbox', id: 'f-music' }),
     womenImages: h('input', { type: 'checkbox', id: 'f-wi' }),
     womenSinging: h('input', { type: 'checkbox', id: 'f-ws' }),
   };
-  const submit = h('button', { type: 'submit', class: 'btn primary block' }, t('Post status'));
+  const submit = h('button', { type: 'submit', class: 'btn primary block' }, t('Post short'));
   const form = h('form', { class: 'post-form card' });
 
   function paint() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = file ? URL.createObjectURL(file) : null;
     fill(
-      kindTabs,
-      [['text', 'Text', 'text'], ['image', 'Photo', 'image'], ['video', 'Video', 'video']].map(([k, label, ic]) => {
-        const b = h('button', { type: 'button', role: 'tab', 'aria-selected': String(kind === k) }, icon(ic, 18), t(label));
-        b.addEventListener('click', () => {
-          kind = k;
-          file = null;
-          paint();
-        });
-        return b;
-      }),
-    );
-    fileInput.setAttribute('accept', kind === 'image' ? 'image/jpeg,image/png,image/webp,image/gif' : 'video/mp4,video/webm,video/quicktime');
-    fill(
-      swatches,
-      BGS.map((c) => {
-        const b = h('button', { type: 'button', class: 'swatch' + (c === bg ? ' on' : ''), role: 'radio', 'aria-checked': String(c === bg), 'aria-label': c, style: { background: c } });
-        b.addEventListener('click', () => {
-          bg = c;
-          paint();
-        });
-        return b;
-      }),
-    );
-    if (kind === 'text') {
-      preview.className = 'post-preview text';
-      preview.style.background = bg;
-      fill(preview, textarea);
-    } else {
-      preview.className = 'post-preview media';
-      preview.style.background = '';
-      if (file) {
-        const url = URL.createObjectURL(file);
-        fill(preview, kind === 'image' ? h('img', { src: url, alt: t('Preview') }) : h('video', { src: url, controls: true, playsinline: true }));
-      } else {
-        fill(preview, h('div', { class: 'pick' }, icon(kind === 'image' ? 'image' : 'video', 40), pickBtn, h('p', { class: 'muted small' }, t('Up to {mb} MB', { mb: state.config.maxUploadMb }))));
-      }
-    }
-    fill(
-      form,
-      h('h1', { class: 'page-title' }, t('Post a status')),
-      kindTabs,
       preview,
-      fileInput,
-      kind === 'text' ? swatches : h('div', { class: 'row' }, file ? pickBtn : null, caption),
-      h(
-        'fieldset',
-        { class: 'flags' },
-        h('legend', {}, t('Help families filter (check all that apply)')),
-        h('label', { class: 'check' }, flags.music, h('span', {}, t('Contains music'))),
-        h('label', { class: 'check' }, flags.womenImages, h('span', {}, t('Shows women'))),
-        h('label', { class: 'check' }, flags.womenSinging, h('span', {}, t('Women singing'))),
-      ),
-      state.me.verified || state.me.role === 'admin' ? null : h('p', { class: 'notice' }, icon('shield', 18), t('New creators’ statuses are reviewed by our team before they appear.')),
-      submit,
+      file
+        ? h('video', { src: previewUrl, controls: true, playsinline: true })
+        : h('div', { class: 'pick' }, icon('video', 44), h('label', { class: 'btn primary', for: 'post-file' }, icon('plus', 18), t('Choose a video')), h('p', { class: 'muted small' }, t('Vertical videos look best. Up to {mb} MB.', { mb: state.config.maxUploadMb }))),
     );
   }
+  fill(
+    form,
+    h('h1', { class: 'page-title' }, t('Post a short')),
+    preview,
+    fileInput,
+    h('div', { class: 'row' }, h('label', { class: 'btn ghost small', for: 'post-file', hidden: !file }, t('Change video'))),
+    h('div', { class: 'field' }, h('label', { for: 'post-caption' }, t('Caption')), caption),
+    h(
+      'fieldset',
+      { class: 'flags' },
+      h('legend', {}, t('Help families filter (check all that apply)')),
+      h('label', { class: 'check' }, flags.music, h('span', {}, t('Contains music'))),
+      h('label', { class: 'check' }, flags.womenImages, h('span', {}, t('Shows women'))),
+      h('label', { class: 'check' }, flags.womenSinging, h('span', {}, t('Women singing'))),
+    ),
+    state.me.verified || state.me.role === 'admin' ? null : h('p', { class: 'notice' }, icon('shield', 18), t('New creators’ shorts are reviewed by our team before they appear.')),
+    submit,
+  );
   fileInput.addEventListener('change', () => {
     const f = fileInput.files[0];
     fileInput.value = '';
@@ -712,31 +831,26 @@ function renderPost() {
     if (f.size > state.config.maxUploadMb * 1024 * 1024) return toast(t('Files can be up to {mb} MB.', { mb: state.config.maxUploadMb }), true);
     file = f;
     paint();
+    form.querySelector('label[for="post-file"].btn.ghost').hidden = false;
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (!file) return toast(t('Choose a video to post.'), true);
     const fd = new FormData();
-    fd.append('kind', kind);
-    if (kind === 'text') {
-      if (!textarea.value.trim()) return toast(t('Write something first.'), true);
-      fd.append('body', textarea.value.trim());
-      fd.append('bg', bg);
-    } else {
-      if (!file) return toast(t('Choose a file to post.'), true);
-      fd.append('body', caption.value.trim());
-    }
+    fd.append('kind', 'video');
+    fd.append('body', caption.value.trim());
     for (const [k, el] of Object.entries(flags)) fd.append(k, el.checked ? '1' : '0');
-    if (file) fd.append('file', file);
+    fd.append('file', file);
     submit.disabled = true;
     try {
       const r = await upload('/statuses', fd, (p) => (submit.textContent = p + '%'));
-      toast(r.pending ? t('Sent for review. It will appear once approved.') : t('Your status is live'));
+      toast(r.pending ? t('Sent for review. It will appear once approved.') : t('Your short is live'));
       location.hash = '#/account';
     } catch (err) {
       toast(err.message, true);
     } finally {
       submit.disabled = false;
-      submit.textContent = t('Post status');
+      submit.textContent = t('Post short');
     }
   });
   paint();
@@ -870,7 +984,7 @@ function renderAccount() {
   );
 
   const parental = h('div', { class: 'card' }, spinner());
-  const mine = h('div', { class: 'card' }, h('h2', {}, t('My statuses')), spinner());
+  const mine = h('div', { class: 'card' }, h('h2', {}, t('My shorts')), spinner());
 
   fill(
     main,
@@ -881,6 +995,7 @@ function renderAccount() {
       me.role === 'admin' ? h('a', { class: 'card admin-link', href: '#/admin' }, icon('settings', 22), h('div', {}, h('strong', {}, t('Admin panel')), h('p', { class: 'muted small' }, t('Videos, statuses, ads, users and settings'))), icon('next', 18)) : null,
       profile,
       langCard,
+      contentPrefsCard(),
       premiumCard,
       parental,
       mine,
@@ -893,7 +1008,7 @@ function renderAccount() {
     .then(({ statuses }) => {
       fill(
         mine,
-        h('div', { class: 'card-head' }, h('h2', {}, t('My statuses')), h('a', { class: 'btn primary small', href: '#/post' }, icon('plus', 16), t('New'))),
+        h('div', { class: 'card-head' }, h('h2', {}, t('My shorts')), h('a', { class: 'btn primary small', href: '#/post' }, icon('plus', 16), t('New'))),
         statuses.length
           ? h(
               'ul',
@@ -922,21 +1037,53 @@ function renderAccount() {
                 return li;
               }),
             )
-          : h('p', { class: 'muted' }, t('You haven’t posted any statuses yet.')),
+          : h('p', { class: 'muted' }, t('You haven’t posted any shorts yet.')),
       );
     })
     .catch(() => mine.remove());
 }
 
 const FILTER_LABELS = () => [
-  ['kidsMode', t('Kids mode'), t('Only show videos and statuses marked for children')],
+  ['kidsMode', t('Kids mode'), t('Only show videos and shorts marked for children')],
   ['hideMusic', t('Hide music'), t('Hide all songs and music videos')],
   ['autoMusicPeriods', t('No music during Sefirah and the Three Weeks'), t('Turns on automatically on those days')],
-  ['hideWomenSinging', t('Hide women singing'), t('Hide videos that include women singing')],
-  ['hideWomenImages', t('Hide images of women'), t('Hide videos and statuses that show women')],
+  ['hideWomenSinging', t('Always hide women singing'), t('Keeps it hidden even if someone changes the content preferences')],
+  ['hideWomenImages', t('Always hide images of women'), t('Keeps it hidden even if someone changes the content preferences')],
   ['hideNews', t('Hide news'), t('Hide news videos')],
-  ['hideStatuses', t('Hide statuses and shorts'), t('Hide posts from creators')],
+  ['hideShorts', t('Hide shorts'), t('Hide short videos from creators')],
+  ['hideStatuses', t('Hide Statuses'), t('Hide the link to YidStatus.com')],
 ];
+
+function contentPrefsCard() {
+  const me = state.me;
+  const f = state.config.filters;
+  const row = (key, id, label, sub, locked) => {
+    const input = h('input', { type: 'checkbox', id, checked: !!me[key] && !locked, disabled: locked });
+    input.addEventListener('change', async () => {
+      try {
+        state.me = (await api('/me', { method: 'PATCH', body: { [key]: input.checked } })).user;
+        await refreshConfig();
+        toast(t('Saved'));
+      } catch (err) {
+        input.checked = !input.checked;
+        toast(err.message, true);
+      }
+    });
+    return h('label', { class: 'switch-row' + (locked ? ' locked' : ''), for: id }, h('span', { class: 'labels' }, h('span', { class: 'label' }, label), h('span', { class: 'sub' }, locked ? t('Locked by parental controls') : sub)), input, h('span', { class: 'sw', 'aria-hidden': 'true' }));
+  };
+  return h(
+    'div',
+    { class: 'card' },
+    h('h2', {}, t('Content preferences')),
+    h('p', { class: 'muted' }, t('Videos and shorts that include women are hidden unless you choose to show them.')),
+    h(
+      'div',
+      { class: 'switch-list' },
+      row('showWomenImages', 'pref-wi', t('Show videos where women appear'), t('Off by default'), f.womenImagesLocked),
+      row('showWomenSinging', 'pref-ws', t('Show videos with women singing'), t('Off by default'), f.womenSingingLocked),
+    ),
+  );
+}
 
 async function renderParentalCard(card) {
   let info;
@@ -950,7 +1097,7 @@ async function renderParentalCard(card) {
 
   const toggles = {};
   const toggleRows = FILTER_LABELS().map(([key, label, sub]) => {
-    const input = h('input', { type: 'checkbox', id: 'pc-' + key, checked: enabled ? acc[key] : key === 'autoMusicPeriods' || key === 'hideWomenSinging' });
+    const input = h('input', { type: 'checkbox', id: 'pc-' + key, checked: enabled ? acc[key] : ['autoMusicPeriods', 'hideWomenSinging', 'hideWomenImages'].includes(key) });
     toggles[key] = input;
     return h('label', { class: 'switch-row', for: 'pc-' + key }, h('span', { class: 'labels' }, h('span', { class: 'label' }, label), h('span', { class: 'sub' }, sub)), input, h('span', { class: 'sw', 'aria-hidden': 'true' }));
   });
@@ -1168,14 +1315,15 @@ const ROUTES = [
   [/^\/?$/, 'home', () => renderHome()],
   [/^\/c\/([\w-]+)$/, (m) => 'c:' + m[1], (m) => renderCategory(m[1])],
   [/^\/v\/(\d+)$/, 'home', (m) => renderWatch(Number(m[1]))],
-  [/^\/status$/, 'status', (m, p) => renderStatuses(p)],
   [/^\/shorts$/, 'shorts', (m, p) => renderShorts(p)],
+  [/^\/shorts\/creators$/, 'shorts', (m, p) => renderShortsCreators(p)],
+  [/^\/status$/, 'status', () => renderYidStatus()],
   [/^\/search$/, 'search', (m, p) => renderSearch(p)],
   [/^\/saved$/, 'saved', () => renderSaved()],
-  [/^\/u\/([^/]+)$/, 'status', (m) => renderCreator(decodeURIComponent(m[1]))],
+  [/^\/u\/([^/]+)$/, 'shorts', (m) => renderCreator(decodeURIComponent(m[1]))],
   [/^\/premium$/, 'premium', (m, p) => renderPremium(p)],
   [/^\/account$/, 'account', () => renderAccount()],
-  [/^\/post$/, 'status', () => renderPost()],
+  [/^\/post$/, 'shorts', () => renderPost()],
   [/^\/login$/, 'account', () => renderAuth('login')],
   [/^\/signup$/, 'account', () => renderAuth('signup')],
   [/^\/admin(?:\/(\w+))?$/, 'admin', async (m) => {

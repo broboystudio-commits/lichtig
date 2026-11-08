@@ -85,6 +85,8 @@ export function meDto(u) {
     lang: u.lang,
     bio: u.bio,
     parental: publicParental(u.parental),
+    showWomenImages: !!u.show_women_images,
+    showWomenSinging: !!u.show_women_singing,
   };
 }
 
@@ -372,12 +374,13 @@ export function createApp() {
     const bio = req.body.bio === undefined ? req.user.bio : String(req.body.bio).trim().slice(0, 200);
     const lang = req.body.lang === undefined ? req.user.lang : req.body.lang === 'yi' ? 'yi' : 'en';
     if (!displayName) return res.status(400).json({ error: 'bad_name', message: 'Display name cannot be empty.' });
-    const u = await one('UPDATE users SET display_name = $2, bio = $3, lang = $4 WHERE id = $1 RETURNING *', [
-      req.user.id,
-      displayName,
-      bio,
-      lang,
-    ]);
+    const showImages = req.body.showWomenImages === undefined ? req.user.show_women_images : bool(req.body.showWomenImages);
+    const showSinging = req.body.showWomenSinging === undefined ? req.user.show_women_singing : bool(req.body.showWomenSinging);
+    const u = await one(
+      `UPDATE users SET display_name = $2, bio = $3, lang = $4, show_women_images = $5, show_women_singing = $6
+       WHERE id = $1 RETURNING *`,
+      [req.user.id, displayName, bio, lang, showImages, showSinging],
+    );
     res.json({ user: meDto(u) });
   });
 
@@ -592,7 +595,7 @@ export function createApp() {
        ORDER BY v.published_at DESC LIMIT 48`,
       [like],
     );
-    const creators = f.hideStatuses
+    const creators = f.hideShorts
       ? []
       : await many(
           `SELECT u.* FROM users u WHERE (u.username ILIKE $1 OR u.display_name ILIKE $1)
@@ -634,7 +637,7 @@ export function createApp() {
         unseen: r.unseen,
         ids: r.ids,
         latestAt: ms(r.latest),
-        preview: { kind: r.last_kind, text: r.last_kind === 'text' || r.last_body ? r.last_body.slice(0, 90) : '' },
+        preview: { kind: r.last_kind, text: (r.last_body || '').slice(0, 90) },
       })),
     });
   });
@@ -672,26 +675,17 @@ export function createApp() {
   });
 
   app.post('/api/statuses', auth.requireAuth, writeLimiter, single('file'), async (req, res) => {
-    const kind = ['text', 'image', 'video'].includes(req.body.kind) ? req.body.kind : null;
-    if (!kind) return res.status(400).json({ error: 'bad_kind', message: 'Choose text, photo or video.' });
-    const body = String(req.body.body || '').trim().slice(0, 700);
-    const bg = STATUS_BGS.includes(req.body.bg) ? req.body.bg : STATUS_BGS[0];
-    let mediaId = null;
-    if (kind === 'text') {
-      if (!body) return res.status(400).json({ error: 'empty', message: 'Write something first.' });
-    } else {
-      if (!req.file) return res.status(400).json({ error: 'no_file', message: 'Choose a file to post.' });
-      const m = await storeMedia(req.file.buffer, req.user.id);
-      const okTypes = kind === 'image' ? IMAGE_TYPES : VIDEO_TYPES;
-      if (!m || !okTypes.includes(m.mime)) {
-        if (m) await deleteMedia(m.id);
-        return res.status(400).json({
-          error: 'bad_type',
-          message: kind === 'image' ? 'Please choose a JPG, PNG, WebP or GIF photo.' : 'Please choose an MP4, WebM or MOV video.',
-        });
-      }
-      mediaId = m.id;
+    // Shorts are always videos.
+    const kind = 'video';
+    const body = String(req.body.body || '').trim().slice(0, 500);
+    const bg = STATUS_BGS[0];
+    if (!req.file) return res.status(400).json({ error: 'no_file', message: 'Choose a video to post.' });
+    const m = await storeMedia(req.file.buffer, req.user.id);
+    if (!m || !VIDEO_TYPES.includes(m.mime)) {
+      if (m) await deleteMedia(m.id);
+      return res.status(400).json({ error: 'bad_type', message: 'Shorts must be a video (MP4, WebM or MOV).' });
     }
+    const mediaId = m.id;
     const autoPublish = req.user.verified || req.user.role === 'admin';
     const r = await one(
       `INSERT INTO statuses (user_id, kind, body, bg, media_id, has_music, women_singing, women_images, status)
