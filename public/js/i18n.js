@@ -320,6 +320,7 @@ export const YI = {
   'It plays from YouTube, which is blocked here (for example by a kosher filter). Lichtig Shorts and original videos still work.': 'ער שפילט פון יוטוב, וואס איז דא בלאקירט (למשל דורך א כשר׳ן פילטער). ליכטיג שארטס און אריגינעלע ווידיאוס ארבעטן יא.',
   'Try another video.': 'פרובירט אן אנדערן ווידיאו.',
   'Watch Shorts': 'קוקט שארטס',
+  'Try YouTube’s player': 'פרובירט יוטוב׳ס פלעיער',
 
   // general
   'Could not connect': 'מען האט נישט געקענט פארבינדן',

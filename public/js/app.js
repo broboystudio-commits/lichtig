@@ -448,11 +448,32 @@ function youTubePlayer(v, related) {
         icon(blocked ? 'shield' : 'tv', 36),
         h('strong', {}, blocked ? t('This video can’t play on this device') : t('This video isn’t available right now')),
         h('p', {}, blocked ? t('It plays from YouTube, which is blocked here (for example by a kosher filter). Lichtig Shorts and original videos still work.') : t('Try another video.')),
-        h('div', { class: 'end-actions' }, h('a', { class: 'btn light small', href: '#/shorts' }, icon('shorts', 16), t('Watch Shorts')), h('a', { class: 'btn ghost-light small', href: '#/' }, t('Back to home'))),
+        h(
+          'div',
+          { class: 'end-actions' },
+          blocked ? null : h('button', { type: 'button', class: 'btn gold small', onclick: standardPlayer }, icon('play', 14), t('Try YouTube’s player')),
+          h('a', { class: 'btn light small', href: '#/shorts' }, icon('shorts', 16), t('Watch Shorts')),
+          h('a', { class: 'btn ghost-light small', href: '#/' }, t('Back to home')),
+        ),
       ),
     );
     box.classList.add('playing', 'unavailable');
   };
+
+  // Safety net: YouTube's standard embedded player (viewer taps play inside it).
+  function standardPlayer() {
+    fill(
+      box,
+      h('iframe', {
+        src: `https://www.youtube-nocookie.com/embed/${v.ytId}?rel=0&playsinline=1&iv_load_policy=3&hl=${lang.current === 'yi' ? 'yi' : 'en'}`,
+        title: v.title,
+        allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
+        referrerpolicy: 'strict-origin-when-cross-origin',
+        allowfullscreen: true,
+      }),
+    );
+    box.classList.remove('unavailable');
+  }
 
   const showEnd = () => {
     const next = related[0];
