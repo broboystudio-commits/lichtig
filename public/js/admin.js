@@ -95,11 +95,12 @@ function statusBadge(s) {
 // ---------- dashboard ----------
 async function dashboard(body) {
   try {
-    const { stats: s, youtubeApi, payments } = await api('/admin/stats');
+    const { stats: s, youtubeApi, payments, storage } = await api('/admin/stats');
     const tile = (label, value, href, accent) => h('a', { class: 'stat' + (accent ? ' accent' : ''), href }, h('strong', {}, fmtCount(value)), h('span', {}, label));
     const todo = [];
     if (s.pending_statuses) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('inbox', 18), t('{n} shorts waiting for review', { n: s.pending_statuses })));
     if (s.pending_videos) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('tv', 18), t('{n} videos waiting for review', { n: s.pending_videos })));
+    if (s.pending_creators) todo.push(h('a', { class: 'todo', href: '#/admin/review' }, icon('users', 18), t('{n} creator applications', { n: s.pending_creators })));
     if (s.open_reports) todo.push(h('a', { class: 'todo', href: '#/admin/reports' }, icon('flag', 18), t('{n} open reports', { n: s.open_reports })));
     fill(
       body,
@@ -125,6 +126,7 @@ async function dashboard(body) {
           { class: 'setup-list' },
           h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('span', {}, youtubeApi ? t('YouTube search and channel sync are on.') : t('YouTube API key not added. You can still add videos by pasting links.'))),
           h('li', {}, icon(payments ? 'check' : 'x', 18), h('span', {}, payments ? t('Stripe payments are on.') : t('Stripe not connected yet. You can turn on Premium for users by hand.'))),
+          h('li', {}, icon(storage ? 'check' : 'x', 18), h('span', {}, storage ? t('Video storage (Cloudflare R2) is connected.') : t('Video storage not connected: videos are kept in the database (up to about 60 MB each, 1 GB total).'))),
           h('li', {}, icon('check', 18), h('span', {}, t('Storage used: {size}', { size: fmtBytes(s.media_bytes) }))),
         ),
       ),
@@ -173,40 +175,43 @@ async function videos(body) {
     }
   });
 
-  // Upload an original video
-  const upFile = h('input', { type: 'file', id: 'up-file', accept: 'video/mp4,video/webm,video/quicktime', class: 'input' });
-  const upTitle = h('input', { class: 'input', id: 'up-title', maxlength: '200', dir: 'auto' });
-  const upCat = categorySelect('', { id: 'up-cat' });
-  const upFlags = flagChecks('up-f-');
-  const upBtn = h('button', { type: 'submit', class: 'btn primary' }, icon('plus', 18), t('Upload'));
-  const upForm = h(
+  // Import a video a creator shared (Google Drive, Dropbox, OneDrive, direct link)
+  const imLink = h('input', { class: 'input', id: 'im-link', placeholder: 'https://drive.google.com/file/d/…' });
+  const imTitle = h('input', { class: 'input', id: 'im-title', maxlength: '200', dir: 'auto' });
+  const imCat = categorySelect('', { id: 'im-cat' });
+  const imCreator = h('input', { class: 'input', id: 'im-creator', placeholder: t('username (optional)') });
+  const imRights = h('input', { class: 'input', id: 'im-rights', maxlength: '300', placeholder: t('e.g. Sent by Yossi Green, WhatsApp, 10 Nov') });
+  const imFlags = flagChecks('im-f-');
+  const imPublish = h('input', { type: 'checkbox', id: 'im-pub', checked: true });
+  const imBtn = h('button', { type: 'submit', class: 'btn primary' }, icon('download', 18), t('Import video'));
+  const importForm = h(
     'form',
     { class: 'card' },
-    h('details', {}, h('summary', {}, h('strong', {}, t('Upload an original video')), h('span', { class: 'muted small' }, ' · ', t('Hosted on Lichtig, can be downloaded by Premium members'))),
-      h('div', { class: 'field' }, h('label', { for: 'up-file' }, t('Video file')), upFile),
-      h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'up-title' }, t('Title')), upTitle), h('div', { class: 'field' }, h('label', { for: 'up-cat' }, t('Category')), upCat)),
-      h('fieldset', { class: 'flags' }, h('legend', {}, t('Content tags')), upFlags.el),
-      h('div', { class: 'row-end' }, upBtn)),
+    h('div', { class: 'card-head' }, h('h2', {}, t('Add a video a creator sent you')), h('a', { class: 'btn ghost small', href: '#/upload' }, icon('upload', 16), t('Upload from this computer'))),
+    h('p', { class: 'muted small' }, t('Paste a Google Drive, Dropbox or OneDrive share link (or a direct video link). Lichtig copies the file and streams it from its own address, so it plays even where YouTube is filtered. Links from YouTube or other video sites are not accepted.')),
+    h('div', { class: 'field' }, h('label', { for: 'im-link' }, t('Share link')), imLink),
+    h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'im-title' }, t('Title')), imTitle), h('div', { class: 'field' }, h('label', { for: 'im-cat' }, t('Category')), imCat)),
+    h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'im-rights' }, t('Who gave permission?')), imRights), h('div', { class: 'field' }, h('label', { for: 'im-creator' }, t('Show on a creator’s channel')), imCreator)),
+    h('fieldset', { class: 'flags' }, h('legend', {}, t('Content tags (used by parental controls)')), imFlags.el),
+    h('div', { class: 'row-end' }, h('label', { class: 'check', for: 'im-pub' }, imPublish, h('span', {}, t('Publish when ready'))), imBtn),
   );
-  upForm.addEventListener('submit', async (e) => {
+  importForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!upFile.files[0]) return toast(t('Choose a video file.'), true);
-    const fd = new FormData();
-    fd.append('title', upTitle.value);
-    fd.append('category', upCat.value);
-    for (const [k, v] of Object.entries(upFlags.values())) fd.append(k, v ? '1' : '0');
-    fd.append('file', upFile.files[0]);
-    upBtn.disabled = true;
+    imBtn.disabled = true;
     try {
-      await upload('/admin/videos/upload', fd, (p) => (upBtn.textContent = p + '%'));
-      toast(t('Video uploaded'));
-      upForm.reset();
+      await api('/admin/videos/import-link', {
+        method: 'POST',
+        body: { link: imLink.value.trim(), title: imTitle.value, category: imCat.value, creator: imCreator.value.trim(), rightsNote: imRights.value, flags: imFlags.values(), publish: imPublish.checked },
+      });
+      toast(t('Importing. It will appear when the copy finishes.'));
+      importForm.reset();
+      filter = 'importing';
+      paintTabs();
       loadList();
     } catch (err) {
       toast(err.message, true);
     } finally {
-      upBtn.disabled = false;
-      upBtn.textContent = t('Upload');
+      imBtn.disabled = false;
     }
   });
 
@@ -254,7 +259,7 @@ async function videos(body) {
     }, 300);
   });
   const paintTabs = () =>
-    fill(tabs, [['published', 'Live'], ['pending', 'In review'], ['rejected', 'Rejected']].map(([k, label]) => {
+    fill(tabs, [['published', 'Live'], ['pending', 'In review'], ['importing', 'Importing'], ['rejected', 'Rejected']].map(([k, label]) => {
       const b = h('button', { type: 'button', class: 'pill' + (filter === k ? ' on' : '') }, t(label));
       b.addEventListener('click', () => {
         filter = k;
@@ -265,10 +270,15 @@ async function videos(body) {
     }));
   paintTabs();
 
+  let refreshTimer = null;
   async function loadList() {
     fill(list, spinner());
     try {
       const r = await api(`/admin/videos?status=${filter}&q=${encodeURIComponent(query)}`);
+      clearTimeout(refreshTimer);
+      if (filter === 'importing' && r.videos.some((v) => v.status === 'processing') && list.isConnected) {
+        refreshTimer = setTimeout(loadList, 5000);
+      }
       if (!r.videos.length) return fill(list, emptyState(t('No videos'), ''));
       fill(list, r.videos.map(videoRow));
     } catch (err) {
@@ -322,7 +332,10 @@ async function videos(body) {
         'div',
         { class: 'admin-row-main' },
         h('a', { class: 'admin-row-title', href: '#/v/' + v.id, dir: 'auto' }, v.title),
-        h('span', { class: 'muted small', dir: 'auto' }, [v.channelName, v.source === 'upload' ? t('Original upload') : 'YouTube', t('{n} views', { n: fmtCount(v.views) })].join(' · ')),
+        h('span', { class: 'muted small', dir: 'auto' }, [v.channelName, v.creator ? '@' + v.creator : null, v.source === 'upload' ? t('Hosted on Lichtig') : 'YouTube', t('{n} views', { n: fmtCount(v.views) })].filter(Boolean).join(' · ')),
+        v.status === 'processing' ? h('span', { class: 'badge-status pending' }, h('span', { class: 'spinner tiny' }), ' ', t('Copying the file…')) : null,
+        v.status === 'failed' ? h('span', { class: 'badge-status rejected' }, t('Import failed: {why}', { why: v.importError })) : null,
+        v.rightsNote ? h('span', { class: 'rights-note' }, icon('shield', 14), v.rightsNote) : null,
         h('div', { class: 'row wrap' }, catSel, feat),
         flagToggles({ ...v.flags }, (f) => patch({ flags: f })),
       ),
@@ -331,7 +344,7 @@ async function videos(body) {
     return row;
   }
 
-  fill(body, addForm, searchCard, upForm, h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', {}, t('All videos')), tabs), search, list));
+  fill(body, importForm, addForm, searchCard, h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', {}, t('All videos')), tabs), search, list));
   loadList();
 }
 
@@ -339,7 +352,36 @@ async function videos(body) {
 async function review(body) {
   const statusesBox = h('div', { class: 'review-grid' }, spinner());
   const videosBox = h('div', { class: 'admin-list' }, spinner());
-  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Shorts waiting for review')), statusesBox), h('div', { class: 'card' }, h('h2', {}, t('Videos waiting for review')), h('p', { class: 'muted small' }, t('New uploads from synced channels land here unless the channel is trusted.')), videosBox));
+  const creatorsBox = h('div', { class: 'admin-list' }, spinner());
+  fill(body, h('div', { class: 'card' }, h('h2', {}, t('Creator applications')), creatorsBox), h('div', { class: 'card' }, h('h2', {}, t('Shorts waiting for review')), statusesBox), h('div', { class: 'card' }, h('h2', {}, t('Videos waiting for review')), h('p', { class: 'muted small' }, t('Creator uploads, and new uploads from synced channels that aren’t trusted, wait here.')), videosBox));
+
+  api('/admin/creators?status=pending')
+    .then(({ creators }) => {
+      if (!creators.length) return fill(creatorsBox, h('p', { class: 'muted' }, t('No applications waiting.')));
+      fill(
+        creatorsBox,
+        creators.map((c) => {
+          const row = h('div', { class: 'admin-row' });
+          const decide = async (status) => {
+            try {
+              await api('/admin/creators/' + c.id, { method: 'PATCH', body: { status } });
+              toast(status === 'approved' ? t('Creator approved') : t('Application declined'));
+              row.remove();
+            } catch (e) {
+              toast(e.message, true);
+            }
+          };
+          fill(
+            row,
+            avatar(c, 44),
+            h('div', { class: 'admin-row-main' }, h('strong', { dir: 'auto' }, c.channel || c.displayName), h('span', { class: 'muted small' }, '@' + c.username + (c.contact ? ' · ' + c.contact : '')), c.about ? h('p', { class: 'small', dir: 'auto' }, c.about) : null),
+            h('div', { class: 'row-actions' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => decide('approved') }, icon('check', 16), t('Approve')), h('button', { type: 'button', class: 'btn small ghost', onclick: () => decide('declined') }, t('Decline'))),
+          );
+          return row;
+        }),
+      );
+    })
+    .catch((err) => fill(creatorsBox, h('p', { class: 'muted' }, err.message)));
 
   try {
     const { statuses } = await api('/admin/statuses?status=pending');
@@ -412,7 +454,7 @@ async function review(body) {
           fill(
             row,
             h('a', { class: 'admin-thumb', href: '#/v/' + v.id }, v.thumbnail ? h('img', { src: v.thumbnail, alt: '' }) : icon('tv', 24)),
-            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: '#/v/' + v.id, dir: 'auto' }, v.title), h('span', { class: 'muted small' }, v.channelName), flagToggles({ ...v.flags }, (f) => api('/admin/videos/' + v.id, { method: 'PATCH', body: { flags: f } }))),
+            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: '#/v/' + v.id, dir: 'auto' }, v.title), h('span', { class: 'muted small' }, [v.channelName, v.creator ? '@' + v.creator : null].filter(Boolean).join(' · ')), v.rightsNote ? h('span', { class: 'rights-note' }, icon('shield', 14), v.rightsNote) : null, flagToggles({ ...v.flags }, (f) => api('/admin/videos/' + v.id, { method: 'PATCH', body: { flags: f } }))),
             h('div', { class: 'row-actions' }, h('button', { type: 'button', class: 'btn small primary', onclick: () => decide('published') }, t('Publish')), h('button', { type: 'button', class: 'btn small ghost', onclick: () => decide('rejected') }, t('Reject'))),
           );
           return row;
@@ -625,7 +667,7 @@ async function users(body) {
             const b = h('button', { type: 'button', class: 'flag-chip' + (value ? ' on' : '') + (key === 'banned' ? ' danger' : ''), 'aria-pressed': String(!!value) }, label);
             b.addEventListener('click', async () => {
               const next = !(b.getAttribute('aria-pressed') === 'true');
-              const body2 = key === 'role' ? { role: next ? 'admin' : 'user' } : { [key]: next };
+              const body2 = key === 'role' ? { role: next ? 'admin' : 'user' } : key === 'creatorStatus' ? { creatorStatus: next ? 'approved' : 'none' } : { [key]: next };
               try {
                 await api('/admin/users/' + u.id, { method: 'PATCH', body: body2 });
                 b.classList.toggle('on', next);
@@ -641,7 +683,7 @@ async function users(body) {
             { class: 'admin-row' },
             avatar(u, 40),
             h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: '#/u/' + encodeURIComponent(u.username) }, u.displayName), h('span', { class: 'muted small' }, '@' + u.username + ' · ' + t('joined {time}', { time: timeAgo(u.createdAt) }) + ' · ' + t('{n} shorts', { n: u.statusCount }))),
-            h('div', { class: 'row-actions wrap' }, toggle('verified', t('Trusted creator'), u.verified), toggle('premium', t('Premium'), u.premium), toggle('role', t('Admin'), u.role === 'admin'), toggle('banned', t('Banned'), u.banned)),
+            h('div', { class: 'row-actions wrap' }, toggle('creatorStatus', t('Video creator'), u.creatorStatus === 'approved'), toggle('verified', t('Trusted (shorts)'), u.verified), toggle('premium', t('Premium'), u.premium), toggle('role', t('Admin'), u.role === 'admin'), toggle('banned', t('Banned'), u.banned)),
           );
         }),
       );
@@ -700,7 +742,7 @@ async function reports(body) {
 async function settings(body) {
   try {
     const { settings: s, cities } = await api('/admin/settings');
-    const { youtubeApi, payments } = await api('/admin/stats');
+    const { youtubeApi, payments, storage } = await api('/admin/stats');
     const siteName = h('input', { class: 'input', id: 'st-name', value: s.siteName, maxlength: '40' });
     const announce = h('input', { class: 'input', id: 'st-ann', value: s.announcement || '', maxlength: '240', dir: 'auto', placeholder: t('Shown at the top of the home page') });
     const price = h('input', { class: 'input', id: 'st-price', value: s.premiumPrice, maxlength: '40' });
@@ -753,6 +795,7 @@ async function settings(body) {
       h('h2', {}, t('Connections')),
       h('ul', { class: 'setup-list' },
         h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('div', {}, h('strong', {}, 'YouTube API'), h('p', { class: 'muted small' }, youtubeApi ? t('Connected: search and automatic channel updates are on.') : t('Optional. Add YOUTUBE_API_KEY on Render to search YouTube from here and auto-add new uploads from approved channels.')))),
+        h('li', {}, icon(storage ? 'check' : 'x', 18), h('div', {}, h('strong', {}, t('Video storage (Cloudflare R2)')), h('p', { class: 'muted small' }, storage ? t('Connected: large videos are stored in R2 and stream from Lichtig’s address.') : t('Add S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY on Render to store full-length videos.')))),
         h('li', {}, icon(payments ? 'check' : 'x', 18), h('div', {}, h('strong', {}, 'Stripe'), h('p', { class: 'muted small' }, payments ? t('Connected: members can subscribe to Premium online.') : t('Add STRIPE_SECRET_KEY, STRIPE_PRICE_ID and STRIPE_WEBHOOK_SECRET on Render to take Premium payments.'))))),
     );
     fill(body, form, catForm, integ);

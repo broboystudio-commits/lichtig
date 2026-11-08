@@ -38,7 +38,7 @@ function client() {
     const h = { ...headers };
     if (jar.size) h.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
     let payload;
-    if (body instanceof FormData) payload = body;
+    if (body instanceof FormData || body instanceof Uint8Array) payload = body;
     else if (body !== undefined) {
       h['content-type'] = 'application/json';
       payload = JSON.stringify(body);
@@ -266,4 +266,28 @@ test('cross-site writes are blocked', async () => {
   const c = await signup('csrfcheck');
   const r = await c('PATCH', '/api/me', { displayName: 'x' }, { origin: 'https://evil.example' });
   assert.equal(r.status, 403);
+});
+
+test('creator uploads also work without cloud storage (kept in the database)', async () => {
+  const c = await signup('dbcreator');
+  assert.equal((await c('POST', '/api/creator/uploads', { filename: 'a.mp4', size: 10 })).status, 403);
+  await c('POST', '/api/creator/apply', { channel: 'DB Channel', about: 'Shiurim' });
+  const a = await admin();
+  const apps = await a('GET', '/api/admin/creators?status=pending');
+  await a('PATCH', `/api/admin/creators/${apps.data.creators.find((x) => x.username === 'dbcreator').id}`, { status: 'approved' });
+  const file = fs.readFileSync(path.join(SEED, 'short-welcome.mp4'));
+  const slot = await c('POST', '/api/creator/uploads', { filename: 'w.mp4', size: file.length, mime: 'video/mp4' });
+  assert.equal(slot.status, 201);
+  const put = await c('PUT', slot.data.uploadUrl, new Uint8Array(file), { 'content-type': 'video/mp4' });
+  assert.equal(put.status, 200);
+  const fd = new FormData();
+  fd.append('mediaId', slot.data.mediaId);
+  fd.append('title', 'Welcome');
+  fd.append('rights', '1');
+  const created = await c('POST', '/api/creator/videos', fd);
+  assert.equal(created.status, 201);
+  const mine = await c('GET', '/api/creator/videos');
+  assert.equal(mine.data.videos[0].status, 'pending');
+  const config = await c('GET', '/api/config');
+  assert.equal(config.data.storage, 'database');
 });

@@ -4,6 +4,8 @@ import { storeMedia, deleteMedia, mediaUrl, IMAGE_TYPES, VIDEO_TYPES } from './m
 import * as yt from './youtube.js';
 import { CITIES } from './jewish.js';
 import { paymentsEnabled } from './stripe.js';
+import { startImport, normalizeLink } from './importer.js';
+import { storageEnabled } from './storage.js';
 
 // Late imports from app.js would be circular; these helpers are small enough to repeat.
 const idParam = (req) => {
@@ -115,13 +117,16 @@ const adminVideoDto = (r) => ({
   mediaUrl: mediaUrl(r.media_id),
   title: r.title,
   channelName: r.channel_name,
-  thumbnail: r.thumbnail_url || null,
+  thumbnail: r.thumbnail_url || mediaUrl(r.poster_media_id) || null,
   category: r.cat_slug || null,
   status: r.status,
   featured: r.featured,
   views: r.views,
   flags: { kidSafe: r.kid_safe, music: r.has_music, womenSinging: r.women_singing, womenImages: r.women_images, news: r.is_news },
   createdAt: ms(r.created_at),
+  rightsNote: r.rights_note || '',
+  importError: r.import_error || '',
+  creator: r.creator_username || null,
 });
 
 export function adminRouter({ single }) {
@@ -138,8 +143,10 @@ export function adminRouter({ single }) {
       (SELECT COUNT(*)::int FROM reports WHERE NOT resolved) AS open_reports,
       (SELECT COALESCE(SUM(impressions), 0)::int FROM ads) AS ad_impressions,
       (SELECT COALESCE(SUM(clicks), 0)::int FROM ads) AS ad_clicks,
-      (SELECT COALESCE(SUM(size), 0)::bigint FROM media) AS media_bytes`);
-    res.json({ stats: { ...s, media_bytes: Number(s.media_bytes) }, youtubeApi: yt.hasApiKey(), payments: paymentsEnabled() });
+      (SELECT COALESCE(SUM(size), 0)::bigint FROM media) AS media_bytes,
+      (SELECT COUNT(*)::int FROM users WHERE creator_status = 'pending') AS pending_creators,
+      (SELECT COUNT(*)::int FROM videos WHERE status IN ('processing', 'failed')) AS importing`);
+    res.json({ stats: { ...s, media_bytes: Number(s.media_bytes) }, youtubeApi: yt.hasApiKey(), payments: paymentsEnabled(), storage: storageEnabled() });
   });
 
   // ---------- videos ----------
@@ -147,7 +154,8 @@ export function adminRouter({ single }) {
   r.get('/videos', async (req, res) => {
     const params = [];
     const cond = ['TRUE'];
-    if (['published', 'pending', 'rejected'].includes(req.query.status)) {
+    if (req.query.status === 'importing') cond.push(`v.status IN ('processing', 'failed')`);
+    else if (['published', 'pending', 'rejected'].includes(req.query.status)) {
       params.push(req.query.status);
       cond.push(`v.status = $${params.length}`);
     }
@@ -157,7 +165,8 @@ export function adminRouter({ single }) {
     }
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const rows = await many(
-      `SELECT v.*, c.slug AS cat_slug FROM videos v LEFT JOIN categories c ON c.id = v.category_id
+      `SELECT v.*, c.slug AS cat_slug, cu.username AS creator_username FROM videos v
+       LEFT JOIN categories c ON c.id = v.category_id LEFT JOIN users cu ON cu.id = v.creator_id
        WHERE ${cond.join(' AND ')} ORDER BY v.created_at DESC LIMIT 51 OFFSET ${offset}`,
       params,
     );
@@ -261,9 +270,79 @@ export function adminRouter({ single }) {
 
   r.delete('/videos/:id', async (req, res) => {
     const id = idParam(req);
-    const v = id && (await one('DELETE FROM videos WHERE id = $1 RETURNING media_id', [id]));
+    const v = id && (await one('DELETE FROM videos WHERE id = $1 RETURNING media_id, poster_media_id', [id]));
     if (!v) return res.status(404).json({ error: 'not_found' });
     await deleteMedia(v.media_id);
+    await deleteMedia(v.poster_media_id);
+    res.json({ ok: true });
+  });
+
+  r.post('/videos/import-link', async (req, res) => {
+    const b = req.body;
+    const title = String(b.title || '').trim().slice(0, 200);
+    const rightsNote = String(b.rightsNote || '').trim().slice(0, 300);
+    if (!title) return res.status(400).json({ error: 'no_title', message: 'Give the video a title.' });
+    if (!rightsNote) return res.status(400).json({ error: 'rights', message: 'Note who gave permission to post this video.' });
+    normalizeLink(b.link); // throws a friendly error for unsupported links
+    let creatorId = null;
+    let channelName = String(b.channelName || '').trim().slice(0, 80);
+    if (b.creator) {
+      const c = await one('SELECT id, display_name FROM users WHERE lower(username) = lower($1)', [String(b.creator).replace(/^@/, '')]);
+      if (!c) return res.status(400).json({ error: 'no_creator', message: 'No user with that username.' });
+      creatorId = c.id;
+      channelName = channelName || c.display_name;
+    }
+    const out = await startImport({
+      link: b.link,
+      title,
+      description: String(b.description || '').slice(0, 5000),
+      categoryId: await categoryId(b.category),
+      flags: flagsFrom(b.flags),
+      rightsNote: `Permission: ${rightsNote} (added by @${req.user.username})`,
+      creatorId,
+      channelName: channelName || (await getSettings()).siteName,
+      addedBy: req.user.id,
+      publish: b.publish !== false,
+    });
+    res.status(202).json(out);
+  });
+
+  r.get('/creators', async (req, res) => {
+    const status = ['pending', 'approved', 'declined'].includes(req.query.status) ? req.query.status : 'pending';
+    const rows = await many(
+      `SELECT u.*, (SELECT COUNT(*)::int FROM videos v WHERE v.creator_id = u.id) AS video_count
+       FROM users u WHERE u.creator_status = $1 ORDER BY u.created_at DESC LIMIT 200`,
+      [status],
+    );
+    res.json({
+      creators: rows.map((u) => {
+        let note = {};
+        try {
+          note = JSON.parse(u.creator_note || '{}');
+        } catch {
+          /* older format */
+        }
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.display_name,
+          avatarUrl: mediaUrl(u.avatar_media_id),
+          status: u.creator_status,
+          channel: note.channel || '',
+          about: note.about || '',
+          contact: note.contact || '',
+          appliedAt: note.at || null,
+          videoCount: u.video_count,
+        };
+      }),
+    });
+  });
+
+  r.patch('/creators/:id', async (req, res) => {
+    const id = idParam(req);
+    const status = ['approved', 'declined', 'none'].includes(req.body.status) ? req.body.status : null;
+    if (!id || !status) return res.status(400).json({ error: 'bad_request' });
+    await query('UPDATE users SET creator_status = $2 WHERE id = $1', [id, status]);
     res.json({ ok: true });
   });
 
@@ -418,6 +497,7 @@ export function adminRouter({ single }) {
         premium: u.is_premium,
         premiumSource: u.premium_source,
         banned: u.banned,
+        creatorStatus: u.creator_status,
         statusCount: u.status_count,
         createdAt: ms(u.created_at),
       })),
@@ -444,6 +524,9 @@ export function adminRouter({ single }) {
         b.banned !== undefined ? bool(b.banned) : u.banned,
       ],
     );
+    if (['approved', 'declined', 'none', 'pending'].includes(b.creatorStatus)) {
+      await query('UPDATE users SET creator_status = $2 WHERE id = $1', [id, b.creatorStatus]);
+    }
     if (bool(b.banned)) await query('DELETE FROM sessions WHERE user_id = $1', [id]);
     res.json({ ok: true });
   });

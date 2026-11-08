@@ -799,3 +799,29 @@ body.closed-mode .app { display: block; }
 .yt-unavailable strong { font-size: 18px; }
 .yt-unavailable p { max-width: 460px; color: rgba(255, 255, 255, 0.85); font-size: 14px; }
 .thumb-ph .logo-mark { opacity: 0.8; }
+
+/* =========================================================
+   Creators, uploads, Lichtig Originals
+   ========================================================= */
+.originals .section-head h2 { display: inline-flex; align-items: center; gap: 6px; }
+.originals-note { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; background: var(--ok-tint); color: var(--ok); font-size: 12px; font-weight: 600; }
+.channel-link { font-weight: 600; color: var(--ink); }
+.channel-link:hover { color: var(--blue); text-decoration: underline; }
+.ms-thumb { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 64px; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--surface-2); color: var(--ink-3); }
+.ms-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.upload-preview { margin-bottom: 16px; }
+.upload-preview video { width: 100%; max-height: 360px; border-radius: 14px; background: #000; }
+.upload-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 200px; padding: 20px;
+  border: 2px dashed var(--line); border-radius: 16px; background: var(--bg); color: var(--ink-2); cursor: pointer; text-align: center;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.upload-drop:hover { border-color: var(--blue); background: var(--blue-tint); }
+.upload-file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 14px; }
+.upload-file > span:nth-child(2) { font-weight: 600; overflow-wrap: anywhere; }
+.check.rights { align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--gold-tint); margin-bottom: 8px; }
+.check.rights input { margin-top: 2px; }
+.progress-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 8px 0 12px; }
+.progress-bar > span { display: block; width: 0; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--blue), var(--blue-2)); transition: width 200ms var(--ease-out); }
+.rights-note { display: inline-flex; align-items: flex-start; gap: 5px; font-size: 12px; color: var(--ok); }
+.spinner.tiny { width: 12px; height: 12px; border-width: 2px; display: inline-block; vertical-align: -2px; }

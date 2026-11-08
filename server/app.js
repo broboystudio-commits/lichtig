@@ -23,6 +23,9 @@ import { closedStatus, hebrewDate, musicPeriod } from './jewish.js';
 import { hasApiKey } from './youtube.js';
 import * as stripe from './stripe.js';
 import { adminRouter } from './admin.js';
+import { creatorRouter } from './creator.js';
+import { storageEnabled } from './storage.js';
+import { maxVideoBytes } from './media.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -87,12 +90,14 @@ export function meDto(u) {
     parental: publicParental(u.parental),
     showWomenImages: !!u.show_women_images,
     showWomenSinging: !!u.show_women_singing,
+    creatorStatus: u.role === 'admin' ? 'approved' : u.creator_status,
   };
 }
 
 export const VIDEO_COLUMNS = `
   v.*, c.slug AS cat_slug, c.name_en AS cat_en, c.name_yi AS cat_yi,
-  (SELECT COUNT(*)::int FROM likes l WHERE l.video_id = v.id) AS like_count`;
+  (SELECT COUNT(*)::int FROM likes l WHERE l.video_id = v.id) AS like_count,
+  (SELECT username FROM users cu WHERE cu.id = v.creator_id) AS creator_username`;
 
 export function videoDto(r) {
   return {
@@ -103,8 +108,9 @@ export function videoDto(r) {
     title: r.title,
     description: r.description,
     channelName: r.channel_name,
-    thumbnail: r.thumbnail_url || null,
+    thumbnail: r.thumbnail_url || mediaUrl(r.poster_media_id) || null,
     durationS: r.duration_s,
+    creator: r.creator_username ? { username: r.creator_username } : null,
     category: r.cat_slug ? { slug: r.cat_slug, nameEn: r.cat_en, nameYi: r.cat_yi } : null,
     flags: {
       kidSafe: r.kid_safe,
@@ -312,6 +318,8 @@ export function createApp() {
         youtubeApi: hasApiKey(),
         demo: process.env.STORAGE_MODE === 'demo',
         maxUploadMb: MAX_UPLOAD_MB,
+        storage: storageEnabled() ? 'cloud' : 'database',
+        maxVideoMb: Math.round(maxVideoBytes() / 1048576),
         bannerAd: banner || null,
         user: req.user ? meDto(req.user) : null,
       });
@@ -497,7 +505,17 @@ export function createApp() {
       `SELECT ${VIDEO_COLUMNS} FROM videos v LEFT JOIN categories c ON c.id = v.category_id
        WHERE ${cond} ORDER BY v.published_at DESC LIMIT 12`,
     );
-    res.json({ featured: featured.map(videoDto), sections, latest: latest.map(videoDto), ads: await pickAds(req, 'banner', 2) });
+    const originals = await many(
+      `SELECT ${VIDEO_COLUMNS} FROM videos v LEFT JOIN categories c ON c.id = v.category_id
+       WHERE ${cond} AND v.source = 'upload' ORDER BY v.published_at DESC LIMIT 16`,
+    );
+    res.json({
+      featured: featured.map(videoDto),
+      originals: originals.map(videoDto),
+      sections,
+      latest: latest.map(videoDto),
+      ads: await pickAds(req, 'banner', 2),
+    });
   });
 
   app.get('/api/videos', async (req, res) => {
@@ -752,9 +770,15 @@ export function createApp() {
        WHERE s.user_id = $1 AND ${statusConditions(f).join(' AND ')} ORDER BY s.created_at DESC LIMIT 60`,
       [u.id],
     );
+    const videos = await many(
+      `SELECT ${VIDEO_COLUMNS} FROM videos v LEFT JOIN categories c ON c.id = v.category_id
+       WHERE v.creator_id = $1 AND ${videoConditions(f).join(' AND ')} ORDER BY v.published_at DESC LIMIT 100`,
+      [u.id],
+    );
     res.json({
-      creator: { ...userDto(u), bio: u.bio, followers: stats.followers, following: stats.following, isMe: me === u.id },
+      creator: { ...userDto(u), bio: u.bio, followers: stats.followers, following: stats.following, isMe: me === u.id, isCreator: u.creator_status === 'approved' },
       statuses: statuses.map(statusDto),
+      videos: videos.map(videoDto),
     });
   });
 
@@ -838,6 +862,7 @@ export function createApp() {
   // ---------- admin ----------
 
   app.use('/api/admin', auth.requireAdmin, adminRouter({ single }));
+  app.use('/api/creator', creatorRouter({ uploadPoster: single('poster'), writeLimiter }));
 
   // ---------- media + static ----------
 
@@ -857,7 +882,7 @@ export function createApp() {
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'bad_json', message: 'Invalid request.' });
-    console.error(err);
+    if (!err.status || err.status >= 500) console.error(err);
     res.status(err.status && err.status < 600 ? err.status : 500).json({
       error: 'server_error',
       message: err.status && err.status < 500 ? err.message : 'Something went wrong on our side.',

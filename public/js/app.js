@@ -1,6 +1,7 @@
 import {
   h, fill, icon, logo, api, upload, t, lang, setLang, catName, state, bus, toast, openSheet, confirmSheet,
   timeAgo, fmtCount, fmtDuration, fmtTime, YI_DAYS_SHORT, avatar, verifiedBadge, emptyState, spinner, openSheets,
+  uploadVideoFile,
 } from './core.js';
 import { openStories, createShorts, downloadMedia, reportContent, toggleFollow, isSeenLocally } from './stories.js';
 
@@ -249,6 +250,16 @@ function renderHome() {
       if (d.ads && d.ads[0]) blocks.push(adBanner(d.ads[0]));
       if (d.featured.length) {
         blocks.push(h('section', { class: 'featured' }, sectionHead(t('Featured')), h('div', { class: 'hero-row' }, d.featured.map((v) => videoCard(v, { size: 'large' })))));
+      }
+      if (d.originals && d.originals.length) {
+        blocks.push(
+          h(
+            'section',
+            { class: 'row-section originals' },
+            h('div', { class: 'section-head' }, h('h2', {}, logo(22), ' ', t('Lichtig Originals')), h('span', { class: 'originals-note' }, icon('shield', 15), t('Streams from Lichtig'))),
+            h('div', { class: 'card-row' }, d.originals.map((v) => videoCard(v))),
+          ),
+        );
       }
       blocks.push(yidStatusCard());
       d.sections.forEach((s, i) => {
@@ -627,7 +638,7 @@ function renderWatch(id) {
           h(
             'div',
             { class: 'watch-bar' },
-            h('div', { class: 'channel' }, h('span', { class: 'channel-avatar' }, v.source === 'upload' ? logo(36) : icon('tv', 20)), h('div', {}, h('strong', { dir: 'auto' }, v.channelName), h('span', { class: 'muted small' }, [v.category ? catName(v.category) : null, t('{n} views', { n: fmtCount(v.views) })].filter(Boolean).join(' · ')))),
+            h('div', { class: 'channel' }, h('span', { class: 'channel-avatar' }, v.source === 'upload' ? logo(36) : icon('tv', 20)), h('div', {}, v.creator ? h('a', { class: 'channel-link', href: '#/u/' + encodeURIComponent(v.creator.username), dir: 'auto' }, v.channelName) : h('strong', { dir: 'auto' }, v.channelName), h('span', { class: 'muted small' }, [v.category ? catName(v.category) : null, t('{n} views', { n: fmtCount(v.views) })].filter(Boolean).join(' · ')))),
             h('div', { class: 'actions' }, likeBtn, saveBtn, shareBtn, dlBtn, reportBtn),
           ),
           d.ads && d.ads[0] ? adBanner(d.ads[0], { compact: true }) : null,
@@ -755,7 +766,7 @@ function renderCreator(username) {
   const page = h('div', { class: 'page' }, spinner());
   fill(main, page);
   api('/creators/' + encodeURIComponent(username))
-    .then(({ creator: c, statuses }) => {
+    .then(({ creator: c, statuses, videos }) => {
       let following = c.following;
       let followers = c.followers;
       const favBtn = h('button', { type: 'button', class: 'btn' });
@@ -786,6 +797,7 @@ function renderCreator(username) {
           h('div', {}, h('h1', { dir: 'auto' }, c.displayName, verifiedBadge(c)), h('p', { class: 'muted' }, '@' + c.username, ' · ', followersEl), c.bio ? h('p', { dir: 'auto' }, c.bio) : null),
           h('div', { class: 'creator-actions' }, c.isMe ? h('a', { class: 'btn primary', href: '#/post' }, icon('plus', 18), t('Post a short')) : favBtn, recent.length ? h('button', { type: 'button', class: 'btn ghost', onclick: () => open(null) }, icon('status', 18), t('Watch shorts')) : null),
         ),
+        videos && videos.length ? [sectionHead(t('Videos')), h('div', { class: 'grid' }, videos.map((v) => videoCard(v)))] : null,
         sectionHead(t('Shorts')),
         statuses.length
           ? h(
@@ -966,6 +978,17 @@ function renderPremium(params) {
 // =====================================================================
 function renderAccount() {
   const me = state.me;
+  if (me) {
+    // Pick up changes made by the admin (creator approval, Premium) without a reload.
+    api('/me')
+      .then((r) => {
+        if (r.user && location.hash.startsWith('#/account') && (r.user.creatorStatus !== state.me.creatorStatus || r.user.premium !== state.me.premium)) {
+          state.me = r.user;
+          route();
+        }
+      })
+      .catch(() => {});
+  }
   if (!me) return fill(main, h('div', { class: 'page narrow' }, needLogin(t('Manage your profile, language and parental controls.'))));
   const name = h('input', { class: 'input', id: 'acc-name', value: me.displayName, maxlength: '40' });
   const bio = h('input', { class: 'input', id: 'acc-bio', value: me.bio || '', maxlength: '200', dir: 'auto' });
@@ -1037,6 +1060,7 @@ function renderAccount() {
       langCard,
       contentPrefsCard(),
       premiumCard,
+      creatorCard(),
       parental,
       mine,
       h('button', { type: 'button', class: 'btn ghost danger-text', onclick: signOut }, icon('logout', 18), t('Sign out')),
@@ -1343,6 +1367,202 @@ function showLimitLock(u, write) {
 }
 
 // =====================================================================
+// Creators: apply, upload full videos, manage them
+// =====================================================================
+function creatorCard() {
+  const me = state.me;
+  const card = h('div', { class: 'card creator-card' });
+  const status = me.creatorStatus;
+  if (status === 'approved') {
+    const list = h('div', {}, spinner());
+    fill(
+      card,
+      h('div', { class: 'card-head' }, h('h2', {}, icon('video', 20), ' ', t('My videos')), h('a', { class: 'btn primary small', href: '#/upload' }, icon('plus', 16), t('Upload a video'))),
+      h('p', { class: 'muted small' }, t('Your videos stream from Lichtig, so they play even where YouTube is filtered.'), ' ', h('a', { href: '#/u/' + encodeURIComponent(me.username) }, t('View my channel'))),
+      list,
+    );
+    api('/creator/videos')
+      .then(({ videos }) => {
+        if (!videos.length) return fill(list, h('p', { class: 'muted' }, t('You haven’t uploaded any videos yet.')));
+        fill(
+          list,
+          h(
+            'ul',
+            { class: 'my-statuses' },
+            videos.map((v) => {
+              const del = h('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('Delete') }, icon('trash', 18));
+              const label = { published: t('Live'), pending: t('In review'), rejected: t('Not approved'), processing: t('Processing'), failed: t('Failed') }[v.status] || v.status;
+              const li = h(
+                'li',
+                {},
+                h('span', { class: 'ms-thumb' }, v.thumbnail ? h('img', { src: v.thumbnail, alt: '' }) : icon('video', 18)),
+                h('span', { class: 'ms-body', dir: 'auto' }, v.status === 'published' ? h('a', { href: '#/v/' + v.id }, v.title) : v.title, v.importError ? h('small', { class: 'danger-text' }, ' · ' + v.importError) : null),
+                h('span', { class: 'badge-status ' + (v.status === 'failed' ? 'rejected' : v.status) }, label),
+                del,
+              );
+              del.addEventListener('click', async () => {
+                if (!(await confirmSheet(t('Delete this video?'), { confirmText: t('Delete'), danger: true }))) return;
+                try {
+                  await api('/creator/videos/' + v.id, { method: 'DELETE' });
+                  li.remove();
+                  toast(t('Deleted'));
+                } catch (err) {
+                  toast(err.message, true);
+                }
+              });
+              return li;
+            }),
+          ),
+        );
+      })
+      .catch((err) => fill(list, h('p', { class: 'muted' }, err.message)));
+    return card;
+  }
+  if (status === 'pending') {
+    return fill(card, h('h2', {}, icon('video', 20), ' ', t('Creator application')), h('p', { class: 'muted' }, t('Thanks! Your application is being reviewed. We’ll turn on video uploads for your account once it’s approved.')));
+  }
+  const channel = h('input', { class: 'input', id: 'cr-channel', maxlength: '80', dir: 'auto' });
+  const about = h('textarea', { class: 'input', id: 'cr-about', rows: '3', maxlength: '600', dir: 'auto' });
+  const contact = h('input', { class: 'input', id: 'cr-contact', maxlength: '120' });
+  const send = h('button', { type: 'submit', class: 'btn primary' }, t('Apply'));
+  const form = h(
+    'form',
+    {},
+    h('div', { class: 'field' }, h('label', { for: 'cr-channel' }, t('Channel or organization name')), channel),
+    h('div', { class: 'field' }, h('label', { for: 'cr-about' }, t('What kind of videos do you make?')), about),
+    h('div', { class: 'field' }, h('label', { for: 'cr-contact' }, t('Phone or email (only the Lichtig team sees this)')), contact),
+    h('div', { class: 'row-end' }, send),
+  );
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    send.disabled = true;
+    try {
+      await api('/creator/apply', { method: 'POST', body: { channel: channel.value, about: about.value, contact: contact.value } });
+      state.me = { ...state.me, creatorStatus: 'pending' };
+      toast(t('Application sent'));
+      fill(card, ...creatorCard().childNodes);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      send.disabled = false;
+    }
+  });
+  return fill(
+    card,
+    h('h2', {}, icon('video', 20), ' ', t('Post full-length videos')),
+    h('p', { class: 'muted' }, t('Singers, maggidei shiur, organizations and other creators can post full videos on Lichtig. They stream from Lichtig, so they reach homes where YouTube is filtered.')),
+    status === 'declined' ? h('p', { class: 'notice' }, t('Your last application wasn’t approved. You’re welcome to apply again.')) : null,
+    form,
+  );
+}
+
+function renderUpload() {
+  const me = state.me;
+  if (!me) return fill(main, h('div', { class: 'page narrow' }, needLogin(t('Sign in to upload videos.'))));
+  if (me.creatorStatus !== 'approved') {
+    // The admin may have approved this account since the page loaded; check before refusing.
+    if (!renderUpload.rechecked) {
+      renderUpload.rechecked = true;
+      fill(main, h('div', { class: 'page narrow' }, spinner()));
+      api('/me')
+        .then((r) => {
+          if (r.user) state.me = r.user;
+          renderUpload();
+        })
+        .catch(() => renderUpload());
+      return;
+    }
+    renderUpload.rechecked = false;
+    return fill(main, h('div', { class: 'page narrow' }, emptyState(t('Creators only'), t('Apply to become a creator on your account page.'), h('a', { class: 'btn primary', href: '#/account' }, t('Go to my account')))));
+  }
+  renderUpload.rechecked = false;
+  const isAdmin = me.role === 'admin';
+  let file = null;
+  let previewUrl = null;
+  const fileInput = h('input', { type: 'file', id: 'up-video', class: 'sr-only', accept: 'video/mp4,video/webm,video/quicktime' });
+  const preview = h('div', { class: 'upload-preview' });
+  const title = h('input', { class: 'input', id: 'up-title', maxlength: '200', dir: 'auto', required: true });
+  const desc = h('textarea', { class: 'input', id: 'up-desc', rows: '4', maxlength: '5000', dir: 'auto' });
+  const cat = h('select', { class: 'input', id: 'up-cat' }, h('option', { value: '' }, t('Choose a category')), categories.map((c) => h('option', { value: c.slug }, catName(c))));
+  const flags = {};
+  const flagEls = [['kidSafe', t('For kids')], ['music', t('Contains music')], ['womenImages', t('Shows women')], ['womenSinging', t('Women singing')], ['news', t('News')]].map(([k, label]) => {
+    flags[k] = h('input', { type: 'checkbox', id: 'up-f-' + k });
+    return h('label', { class: 'check', for: 'up-f-' + k }, flags[k], h('span', {}, label));
+  });
+  const rights = h('input', { type: 'checkbox', id: 'up-rights' });
+  const rightsNote = h('input', { class: 'input', id: 'up-rights-note', maxlength: '300', placeholder: t('Optional: who gave permission, if it isn’t yours') });
+  const publish = isAdmin ? h('input', { type: 'checkbox', id: 'up-publish', checked: true }) : null;
+  const bar = h('div', { class: 'progress-bar', hidden: true }, h('span'));
+  const submit = h('button', { type: 'submit', class: 'btn primary block' }, icon('upload', 18), t('Upload video'));
+
+  function paintPreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = file ? URL.createObjectURL(file) : null;
+    fill(
+      preview,
+      file
+        ? [h('video', { src: previewUrl, controls: true, playsinline: true }), h('div', { class: 'upload-file' }, icon('video', 16), h('span', {}, file.name), h('span', { class: 'muted small' }, (file.size / 1048576).toFixed(1) + ' MB'), h('label', { class: 'btn ghost small', for: 'up-video' }, t('Change video')))]
+        : h('label', { class: 'upload-drop', for: 'up-video' }, icon('upload', 36), h('strong', {}, t('Choose a video')), h('span', { class: 'muted small' }, t('MP4, MOV or WebM, up to {mb} MB', { mb: state.config.maxVideoMb }))),
+    );
+  }
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files[0];
+    fileInput.value = '';
+    if (!f) return;
+    if (f.size > state.config.maxVideoMb * 1048576) return toast(t('Videos can be up to {mb} MB.', { mb: state.config.maxVideoMb }), true);
+    file = f;
+    if (!title.value) title.value = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, 200);
+    paintPreview();
+  });
+
+  const form = h(
+    'form',
+    { class: 'card upload-form' },
+    h('h1', { class: 'page-title' }, icon('upload', 24), ' ', t('Upload a video')),
+    preview,
+    fileInput,
+    h('div', { class: 'field' }, h('label', { for: 'up-title' }, t('Title')), title),
+    h('div', { class: 'field' }, h('label', { for: 'up-desc' }, t('Description')), desc),
+    h('div', { class: 'field' }, h('label', { for: 'up-cat' }, t('Category')), cat),
+    h('fieldset', { class: 'flags' }, h('legend', {}, t('Help families filter (check all that apply)')), flagEls),
+    h('label', { class: 'check rights', for: 'up-rights' }, rights, h('span', {}, t('I own this video, or I have permission from its owner to publish it on Lichtig.'))),
+    h('div', { class: 'field' }, rightsNote),
+    isAdmin ? h('label', { class: 'check', for: 'up-publish' }, publish, h('span', {}, t('Publish right away'))) : h('p', { class: 'notice' }, icon('shield', 18), t('The Lichtig team reviews every video before it goes live.')),
+    bar,
+    submit,
+  );
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!file) return toast(t('Choose a video to upload.'), true);
+    if (!title.value.trim()) return toast(t('Give the video a title.'), true);
+    if (!rights.checked) return toast(t('Please confirm you own this video or have permission to publish it.'), true);
+    submit.disabled = true;
+    bar.hidden = false;
+    const fields = { title: title.value.trim(), description: desc.value, category: cat.value, rights: true, rightsNote: rightsNote.value.trim() };
+    for (const [k, el] of Object.entries(flags)) fields[k] = el.checked;
+    if (isAdmin) fields.publish = publish.checked ? 'true' : 'false';
+    try {
+      const r = await uploadVideoFile({
+        file,
+        fields,
+        onProgress: (p) => {
+          bar.firstChild.style.width = p + '%';
+          submit.textContent = p < 97 ? t('Uploading {p}%', { p }) : t('Finishing…');
+        },
+      });
+      toast(r.pending ? t('Uploaded! It will go live after review.') : t('Your video is live'));
+      location.hash = r.pending ? '#/account' : '#/v/' + r.id;
+    } catch (err) {
+      toast(err.message, true);
+      submit.disabled = false;
+      fill(submit, icon('upload', 18), t('Upload video'));
+    }
+  });
+  paintPreview();
+  fill(main, h('div', { class: 'page narrow' }, form));
+}
+
+// =====================================================================
 // Router
 // =====================================================================
 async function refreshConfig() {
@@ -1364,6 +1584,7 @@ const ROUTES = [
   [/^\/premium$/, 'premium', (m, p) => renderPremium(p)],
   [/^\/account$/, 'account', () => renderAccount()],
   [/^\/post$/, 'shorts', () => renderPost()],
+  [/^\/upload$/, 'account', () => renderUpload()],
   [/^\/login$/, 'account', () => renderAuth('login')],
   [/^\/signup$/, 'account', () => renderAuth('signup')],
   [/^\/admin(?:\/(\w+))?$/, 'admin', async (m) => {

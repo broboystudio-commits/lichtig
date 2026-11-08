@@ -189,6 +189,76 @@ export function upload(path, form, onProgress) {
   });
 }
 
+/** Send a file's raw bytes with PUT (used for large video uploads to Lichtig). */
+export function putFile(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let msg = null;
+      try {
+        msg = JSON.parse(xhr.responseText).message;
+      } catch {
+        /* not json */
+      }
+      reject(new Error(msg || t('Upload failed. Please try again.')));
+    };
+    xhr.onerror = () => reject(new Error(t('Network error. Check your connection and try again.')));
+    xhr.send(file);
+  });
+}
+
+/** Grab a frame from a local video file to use as its thumbnail (JPEG Blob, or null). */
+export function captureThumbnail(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    const done = (blob) => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      resolve(blob || null);
+    };
+    const timer = setTimeout(() => done(null), 10000);
+    v.addEventListener('loadedmetadata', () => {
+      v.currentTime = Math.min(2, (v.duration || 2) / 3);
+    });
+    v.addEventListener('seeked', () => {
+      try {
+        const scale = Math.min(1, 960 / (v.videoWidth || 960));
+        const c = document.createElement('canvas');
+        c.width = Math.round((v.videoWidth || 960) * scale);
+        c.height = Math.round((v.videoHeight || 540) * scale);
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((b) => done(b), 'image/jpeg', 0.82);
+      } catch {
+        done(null);
+      }
+    });
+    v.addEventListener('error', () => done(null));
+    v.src = url;
+  });
+}
+
+/** Full upload flow for a video: reserve, send the file to Lichtig, then save the details. */
+export async function uploadVideoFile({ file, fields, onProgress }) {
+  const poster = await captureThumbnail(file);
+  const slot = await api('/creator/uploads', { method: 'POST', body: { filename: file.name, size: file.size, mime: file.type } });
+  await putFile(slot.uploadUrl, file, (p) => onProgress && onProgress(Math.round(p * 97)));
+  const fd = new FormData();
+  fd.append('mediaId', slot.mediaId);
+  for (const [k, v] of Object.entries(fields)) fd.append(k, typeof v === 'boolean' ? (v ? '1' : '0') : v);
+  if (poster) fd.append('poster', poster, 'poster.jpg');
+  const res = await api('/creator/videos', { method: 'POST', form: fd });
+  if (onProgress) onProgress(100);
+  return res;
+}
+
 // ---------------- formatting ----------------
 export function timeAgo(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
