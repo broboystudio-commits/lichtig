@@ -315,6 +315,12 @@ export const YI = {
   'Hide Statuses': 'באהאלט סטאטוסן',
   'Hide the link to YidStatus.com': 'באהאלט דעם לינק צו YidStatus.com',
 
+  'This video can’t play on this device': 'דער ווידיאו קען נישט שפילן אויף דעם מכשיר',
+  'This video isn’t available right now': 'דער ווידיאו איז יעצט נישט צוגעשטעלט',
+  'It plays from YouTube, which is blocked here (for example by a kosher filter). Lichtig Shorts and original videos still work.': 'ער שפילט פון יוטוב, וואס איז דא בלאקירט (למשל דורך א כשר׳ן פילטער). ליכטיג שארטס און אריגינעלע ווידיאוס ארבעטן יא.',
+  'Try another video.': 'פרובירט אן אנדערן ווידיאו.',
+  'Watch Shorts': 'קוקט שארטס',
+
   // general
   'Could not connect': 'מען האט נישט געקענט פארבינדן',
   'Try again': 'פרובירט נאכאמאל',

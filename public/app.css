@@ -788,3 +788,14 @@ body.closed-mode .app { display: block; }
 @media (max-width: 360px) {
   .brand-text { display: none; }
 }
+
+/* When YouTube or its thumbnails are blocked (e.g. by a kosher filter) */
+.yt-facade.no-poster { background: radial-gradient(circle at 30% 20%, #1d4f9c, #0b1f45 70%); }
+.yt-unavailable {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 20px; text-align: center; color: #fff; background: radial-gradient(circle at 30% 20%, #1d4f9c, #0b1f45 70%);
+}
+.yt-unavailable .icon { color: var(--gold-bright); }
+.yt-unavailable strong { font-size: 18px; }
+.yt-unavailable p { max-width: 460px; color: rgba(255, 255, 255, 0.85); font-size: 14px; }
+.thumb-ph .logo-mark { opacity: 0.8; }

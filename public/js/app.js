@@ -114,7 +114,13 @@ async function switchLang(next) {
 // =====================================================================
 function videoCard(v, { size = '' } = {}) {
   const thumb = v.thumbnail
-    ? h('img', { src: v.thumbnail, alt: '', loading: 'lazy' })
+    ? h('img', {
+        src: v.thumbnail,
+        alt: '',
+        loading: 'lazy',
+        // If thumbnails are blocked (e.g. by a filter), show a branded placeholder instead of a broken image.
+        onerror: (e) => e.currentTarget.replaceWith(h('span', { class: 'thumb-ph' }, logo(30))),
+      })
     : v.mediaUrl
       ? (() => {
           const el = h('video', { preload: 'metadata', muted: true, playsinline: true, tabindex: '-1', 'aria-hidden': 'true' });
@@ -392,7 +398,7 @@ function loadYouTubeApi() {
         reject(new Error('YouTube player failed to load'));
       };
       document.head.append(s);
-      setTimeout(() => reject(new Error('YouTube player timed out')), 9000);
+      setTimeout(() => reject(new Error('YouTube player timed out')), 7000);
     });
   }
   return ytApiPromise;
@@ -407,7 +413,11 @@ function youTubePlayer(v, related) {
   const box = h('div', { class: 'player yt-facade' });
   const poster = h('img', { class: 'facade-poster', src: `https://i.ytimg.com/vi/${v.ytId}/maxresdefault.jpg`, alt: '' });
   poster.addEventListener('error', () => {
-    if (poster.dataset.fallback) return;
+    if (poster.dataset.fallback) {
+      poster.remove(); // thumbnails blocked too: keep the branded background
+      box.classList.add('no-poster');
+      return;
+    }
     poster.dataset.fallback = '1';
     poster.src = `https://i.ytimg.com/vi/${v.ytId}/hqdefault.jpg`;
   });
@@ -422,17 +432,26 @@ function youTubePlayer(v, related) {
   let player = null;
   let revealTimer = null;
 
-  const iframeFallback = () => {
+  // Shown when YouTube can't load (for example a kosher filter blocks it) or the video errors.
+  const showUnavailable = (blocked) => {
     clearTimeout(revealTimer);
-    const frame = h('iframe', {
-      src: `https://www.youtube-nocookie.com/embed/${v.ytId}?autoplay=1&rel=0&playsinline=1&iv_load_policy=3&hl=${lang.current === 'yi' ? 'yi' : 'en'}`,
-      title: v.title,
-      allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share',
-      referrerpolicy: 'strict-origin-when-cross-origin',
-      allowfullscreen: true,
-    });
-    fill(box, frame);
-    box.classList.add('playing');
+    try {
+      if (player && player.destroy) player.destroy();
+    } catch {
+      /* already gone */
+    }
+    fill(
+      box,
+      h(
+        'div',
+        { class: 'yt-unavailable' },
+        icon(blocked ? 'shield' : 'tv', 36),
+        h('strong', {}, blocked ? t('This video can’t play on this device') : t('This video isn’t available right now')),
+        h('p', {}, blocked ? t('It plays from YouTube, which is blocked here (for example by a kosher filter). Lichtig Shorts and original videos still work.') : t('Try another video.')),
+        h('div', { class: 'end-actions' }, h('a', { class: 'btn light small', href: '#/shorts' }, icon('shorts', 16), t('Watch Shorts')), h('a', { class: 'btn ghost-light small', href: '#/' }, t('Back to home'))),
+      ),
+    );
+    box.classList.add('playing', 'unavailable');
   };
 
   const showEnd = () => {
@@ -488,11 +507,11 @@ function youTubePlayer(v, related) {
             }
             if (e.data === 0) showEnd();
           },
-          onError: iframeFallback,
+          onError: () => showUnavailable(false),
         },
       });
     } catch {
-      iframeFallback();
+      showUnavailable(true);
     }
   });
 
