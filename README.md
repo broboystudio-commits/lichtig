@@ -13,7 +13,8 @@ Kosher videos, shorts and statuses for the whole family, in English and Yiddish.
 - **Premium subscription.** Premium removes all ads and allows downloading shorts and Lichtig-hosted videos. It works with Stripe. Until Stripe is connected, the admin can turn on Premium by hand.
 - **Kosher ads.** Only ads the admin uploads are shown, with scheduling, weighting and view and click counts. Premium members see none, and ads are never placed over YouTube videos.
 - **English / Yiddish.** The switch translates the interface without flipping the layout.
-- **Admin panel.** Sections cover the dashboard, adding YouTube videos by link, YouTube search, the review queue, approved channels with auto-sync, ads, users, reports and settings.
+- **Admin panel.** Sections cover the dashboard, adding YouTube videos by link, YouTube search, the review queue, approved channels, ads, users, reports and settings.
+- **Channel auto-updates.** Paste a channel's ID link (`youtube.com/channel/UC…`) under Admin → Channels. Lichtig checks it about every 6 hours through YouTube's public feed, with no API key needed, and adds new uploads. Uploads from trusted channels go live; others wait in Review.
 - **Creators & Lichtig Originals.** Users apply to become creators, and the admin approves them. Approved creators upload full-length videos and confirm they own them or have permission. Every creator video is reviewed before it goes live. Hosted videos appear under **Lichtig Originals** and on the creator's channel.
 - **Import from a link.** The admin pastes a Google Drive, Dropbox or OneDrive share link (or a direct video link) that a creator sent, along with a note of who gave permission. Lichtig copies the file in the background. Links from YouTube and other video platforms are refused.
 - **Filter-friendly.** Everything hosted on Lichtig, including uploads and playback, goes through Lichtig's own address. If a kosher filter allows Lichtig, these videos play even when YouTube is blocked.
@@ -41,7 +42,7 @@ Viewers never connect to R2 directly. Lichtig streams every file through its own
 | `DATABASE_URL` | Postgres connection string. Without it, an embedded database in `./data` is used. |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login. It is created or updated on every start. |
 | `SESSION_SECRET` | Long random string used to sign the parental-lock cookie. |
-| `YOUTUBE_API_KEY` | Optional. Turns on YouTube search, video durations and automatic channel sync. |
+| `YOUTUBE_API_KEY` | Optional. Turns on YouTube search, video lengths and following channels by their @name link. Channel auto-updates work without it. |
 | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET` | Optional. Turns on Premium payments. The webhook URL is `/api/stripe/webhook`. |
 | `PUBLIC_URL` | Site address used for Stripe return links (e.g. `https://lichtig.onrender.com`). |
 | `MAX_UPLOAD_MB` | Largest short/photo upload (default 25). |

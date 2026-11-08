@@ -124,7 +124,7 @@ async function dashboard(body) {
         h(
           'ul',
           { class: 'setup-list' },
-          h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('span', {}, youtubeApi ? t('YouTube search and channel sync are on.') : t('YouTube API key not added. You can still add videos by pasting links.'))),
+          h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('span', {}, youtubeApi ? t('YouTube search is on.') : t('YouTube API key not added. Pasting links and channel auto-updates still work.'))),
           h('li', {}, icon(payments ? 'check' : 'x', 18), h('span', {}, payments ? t('Stripe payments are on.') : t('Stripe not connected yet. You can turn on Premium for users by hand.'))),
           h('li', {}, icon(storage ? 'check' : 'x', 18), h('span', {}, storage ? t('Video storage (Cloudflare R2) is connected.') : t('Video storage not connected: videos are kept in the database (up to about 60 MB each, 1 GB total).'))),
           h('li', {}, icon('check', 18), h('span', {}, t('Storage used: {size}', { size: fmtBytes(s.media_bytes) }))),
@@ -467,7 +467,7 @@ async function review(body) {
 
 // ---------- channels ----------
 async function channels(body) {
-  const url = h('input', { class: 'input', id: 'ch-url', placeholder: 'https://www.youtube.com/@ChannelName' });
+  const url = h('input', { class: 'input', id: 'ch-url', placeholder: 'https://www.youtube.com/channel/UC…' });
   const cat = categorySelect('', { id: 'ch-cat' });
   const trusted = h('input', { type: 'checkbox', id: 'ch-trusted' });
   const add = h('button', { type: 'submit', class: 'btn primary' }, icon('plus', 18), t('Add channel'));
@@ -475,8 +475,8 @@ async function channels(body) {
     'form',
     { class: 'card' },
     h('h2', {}, t('Approved channels')),
-    h('p', { class: 'muted small' }, t('With a YouTube API key, Lichtig checks these channels every 6 hours and adds new uploads. Uploads from trusted channels go live right away; others wait in Review.')),
-    h('div', { class: 'field' }, h('label', { for: 'ch-url' }, t('Channel link')), url),
+    h('p', { class: 'muted small' }, t('Lichtig checks these channels about every 6 hours and adds their new uploads. Uploads from trusted channels go live right away; others wait in Review. No YouTube API key is needed.')),
+    h('div', { class: 'field' }, h('label', { for: 'ch-url' }, t('Channel ID link')), url, h('p', { class: 'muted small hint' }, t('On YouTube, open the channel, tap “More about this channel”, then “Share channel”, then “Copy channel ID”, and paste it here. A youtube.com/@name link also works once a YouTube API key is added.'))),
     h('div', { class: 'row two' }, h('div', { class: 'field' }, h('label', { for: 'ch-cat' }, t('Default category')), cat), h('label', { class: 'check', for: 'ch-trusted' }, trusted, h('span', {}, t('Trusted (publish new uploads automatically)')))),
     h('div', { class: 'row-end' }, add),
   );
@@ -486,7 +486,8 @@ async function channels(body) {
     add.disabled = true;
     try {
       const r = await api('/admin/channels', { method: 'POST', body: { url: url.value.trim(), category: cat.value, trusted: trusted.checked } });
-      toast(r.sync && r.sync.added !== undefined ? t('Channel added. {n} new videos found.', { n: r.sync.added }) : t('Channel added'));
+      if (r.sync && r.sync.error) toast(t('Channel added, but the first check failed: {why}', { why: r.sync.error }), true);
+      else toast(r.sync && r.sync.added !== undefined ? t('Channel added. {n} new videos found.', { n: r.sync.added }) : t('Channel added'));
       form.reset();
       load();
     } catch (err) {
@@ -514,6 +515,18 @@ async function channels(body) {
               toast(e.message, true);
             }
           });
+          const follow = h('button', { type: 'button', class: 'flag-chip' + (c.autoSync ? ' on' : ''), 'aria-pressed': String(c.autoSync), title: t('Check this channel for new uploads automatically') }, t('Auto-update'));
+          follow.addEventListener('click', async () => {
+            if (!c.autoSync && !c.canFollow) return toast(t('Add this channel again using its channel ID link to turn on auto-update.'), true);
+            try {
+              await api('/admin/channels/' + c.id, { method: 'PATCH', body: { autoSync: !c.autoSync } });
+              c.autoSync = !c.autoSync;
+              follow.classList.toggle('on', c.autoSync);
+              follow.setAttribute('aria-pressed', String(c.autoSync));
+            } catch (e) {
+              toast(e.message, true);
+            }
+          });
           const sync = h('button', { type: 'button', class: 'btn small ghost' }, icon('refresh', 16), t('Check now'));
           sync.addEventListener('click', async () => {
             sync.disabled = true;
@@ -536,8 +549,8 @@ async function channels(body) {
           fill(
             row,
             h('span', { class: 'admin-thumb round' }, c.thumbnail ? h('img', { src: c.thumbnail, alt: '' }) : icon('tv', 22)),
-            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: c.url, target: '_blank', rel: 'noopener', dir: 'auto' }, c.name), h('span', { class: 'muted small' }, [t('{n} videos', { n: c.videoCount }), c.lastSyncedAt ? t('checked {time}', { time: timeAgo(c.lastSyncedAt) }) : null].filter(Boolean).join(' · '))),
-            h('div', { class: 'row-actions' }, tr, sync, del),
+            h('div', { class: 'admin-row-main' }, h('a', { class: 'admin-row-title', href: c.url, target: '_blank', rel: 'noopener', dir: 'auto' }, c.name), h('span', { class: 'muted small' }, [t('{n} videos', { n: c.videoCount }), c.lastSyncedAt ? t('checked {time}', { time: timeAgo(c.lastSyncedAt) }) : null].filter(Boolean).join(' · ')), c.syncError ? h('span', { class: 'badge-status rejected' }, t('Last check failed: {why}', { why: c.syncError })) : null),
+            h('div', { class: 'row-actions' }, follow, tr, sync, del),
           );
           return row;
         }),
@@ -794,7 +807,7 @@ async function settings(body) {
       { class: 'card' },
       h('h2', {}, t('Connections')),
       h('ul', { class: 'setup-list' },
-        h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('div', {}, h('strong', {}, 'YouTube API'), h('p', { class: 'muted small' }, youtubeApi ? t('Connected: search and automatic channel updates are on.') : t('Optional. Add YOUTUBE_API_KEY on Render to search YouTube from here and auto-add new uploads from approved channels.')))),
+        h('li', {}, icon(youtubeApi ? 'check' : 'x', 18), h('div', {}, h('strong', {}, 'YouTube API'), h('p', { class: 'muted small' }, youtubeApi ? t('Connected: YouTube search and video lengths are on.') : t('Optional. Channel auto-updates work without it. Add YOUTUBE_API_KEY on Render to search YouTube from here, show video lengths and follow channels by their @name link.')))),
         h('li', {}, icon(storage ? 'check' : 'x', 18), h('div', {}, h('strong', {}, t('Video storage (Cloudflare R2)')), h('p', { class: 'muted small' }, storage ? t('Connected: large videos are stored in R2 and stream from Lichtig’s address.') : t('Add S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY on Render to store full-length videos.')))),
         h('li', {}, icon(payments ? 'check' : 'x', 18), h('div', {}, h('strong', {}, 'Stripe'), h('p', { class: 'muted small' }, payments ? t('Connected: members can subscribe to Premium online.') : t('Add STRIPE_SECRET_KEY, STRIPE_PRICE_ID and STRIPE_WEBHOOK_SECRET on Render to take Premium payments.'))))),
     );

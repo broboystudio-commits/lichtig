@@ -79,20 +79,45 @@ export async function importYouTube(ytId, { categoryId: catId = null, flags = {}
   return { id: row.id, existed: false };
 }
 
+const NEEDS_ID =
+  "Lichtig needs this channel's ID link to follow it without a YouTube API key. On YouTube, open the channel, tap More about this channel, then Share channel, then Copy channel ID, and paste it here.";
+
+/** Find a channel's latest uploads: the Data API when there's a key, otherwise the public feed. */
+async function channelUploads(channel) {
+  const feedId = channel.yt_channel_id || yt.channelIdFromUrl(channel.url);
+  if (yt.hasApiKey()) {
+    try {
+      const info = await yt.resolveChannel(channel.url);
+      if (info && info.uploads) {
+        const ids = await yt.latestUploads(info.uploads, 15);
+        return { channelId: info.id, name: info.name, thumbnail: info.thumbnail, ids, details: await yt.videoDetails(ids) };
+      }
+    } catch (err) {
+      if (!feedId) throw err;
+    }
+  }
+  if (!feedId) throw Object.assign(new Error(yt.hasApiKey() ? 'Could not find that channel on YouTube.' : NEEDS_ID), { status: 400 });
+  const feed = await yt.feedUploads(feedId, 15);
+  return { channelId: feedId, name: feed.name || channel.name, thumbnail: channel.thumbnail_url || '', ids: feed.ids, details: feed.details };
+}
+
 export async function syncChannel(channel) {
-  if (!yt.hasApiKey()) throw Object.assign(new Error('Add a YouTube API key to sync channels.'), { status: 400 });
-  const info = await yt.resolveChannel(channel.url);
-  if (!info || !info.uploads) throw Object.assign(new Error('Could not find that channel on YouTube.'), { status: 400 });
-  await query('UPDATE channels SET yt_channel_id = $2, name = $3, thumbnail_url = $4, last_synced_at = now() WHERE id = $1', [
+  let found;
+  try {
+    found = await channelUploads(channel);
+  } catch (err) {
+    await query("UPDATE channels SET last_synced_at = now(), sync_error = $2 WHERE id = $1", [channel.id, err.message]);
+    throw err;
+  }
+  await query("UPDATE channels SET yt_channel_id = $2, name = $3, thumbnail_url = $4, last_synced_at = now(), sync_error = '' WHERE id = $1", [
     channel.id,
-    info.id,
-    info.name,
-    info.thumbnail,
+    found.channelId,
+    found.name || channel.name,
+    found.thumbnail || '',
   ]);
-  const ids = await yt.latestUploads(info.uploads, 15);
+  const { ids, details } = found;
   const known = new Set((await many('SELECT yt_id FROM videos WHERE yt_id = ANY($1::text[])', [ids])).map((r) => r.yt_id));
   const fresh = ids.filter((id) => !known.has(id));
-  const details = await yt.videoDetails(fresh);
   let added = 0;
   for (const id of fresh) {
     try {
@@ -108,6 +133,17 @@ export async function syncChannel(channel) {
     }
   }
   return { added, checked: ids.length };
+}
+
+/** Check every followed channel that hasn't been checked in the last 6 hours. */
+export async function syncDueChannels() {
+  const due = await many(
+    "SELECT * FROM channels WHERE auto_sync AND (last_synced_at IS NULL OR last_synced_at < now() - interval '6 hours') ORDER BY last_synced_at NULLS FIRST",
+  );
+  for (const ch of due) {
+    await syncChannel(ch).catch((err) => console.warn('Channel check failed:', ch.url, err.message));
+  }
+  return due.length;
 }
 
 const adminVideoDto = (r) => ({
@@ -361,7 +397,7 @@ export function adminRouter({ single }) {
   r.get('/channels', async (_req, res) => {
     const rows = await many(
       `SELECT ch.*, c.slug AS cat_slug, (SELECT COUNT(*)::int FROM videos v WHERE v.channel_id = ch.id) AS video_count
-       FROM channels ch LEFT JOIN categories c ON c.id = ch.category_id ORDER BY ch.name`,
+       FROM channels ch LEFT JOIN categories c ON c.id = ch.category_id ORDER BY ch.auto_sync DESC, ch.name`,
     );
     res.json({
       channels: rows.map((c) => ({
@@ -371,6 +407,9 @@ export function adminRouter({ single }) {
         thumbnail: c.thumbnail_url || null,
         category: c.cat_slug,
         trusted: c.trusted,
+        autoSync: c.auto_sync,
+        canFollow: !!(c.yt_channel_id || yt.channelIdFromUrl(c.url) || yt.hasApiKey()),
+        syncError: c.sync_error || null,
         videoCount: c.video_count,
         lastSyncedAt: ms(c.last_synced_at),
       })),
@@ -378,19 +417,21 @@ export function adminRouter({ single }) {
   });
 
   r.post('/channels', async (req, res) => {
-    const url = String(req.body.url || '').trim();
-    if (!/^https:\/\/(www\.)?youtube\.com\/(@[\w.-]+|channel\/UC[\w-]+)/.test(url)) {
-      return res.status(400).json({ error: 'bad_url', message: 'Paste a channel link like https://www.youtube.com/@ChannelName' });
+    let url = String(req.body.url || '').trim();
+    if (/^UC[\w-]{22}$/.test(url)) url = 'https://www.youtube.com/channel/' + url;
+    if (!/^https:\/\/(www\.|m\.)?youtube\.com\/(@[\w.-]+|channel\/UC[\w-]{22})/.test(url)) {
+      return res.status(400).json({ error: 'bad_url', message: 'Paste a channel link like https://www.youtube.com/channel/UC… or https://www.youtube.com/@ChannelName' });
     }
-    const clean = url.replace(/\/(videos|featured|shorts|streams)\/?$/, '').replace(/\/$/, '');
+    const feedId = yt.channelIdFromUrl(url);
+    if (!feedId && !yt.hasApiKey()) return res.status(400).json({ error: 'needs_channel_id', message: NEEDS_ID });
+    const clean = feedId ? 'https://www.youtube.com/channel/' + feedId : url.replace(/^https:\/\/(m\.)?/, 'https://').replace(/[?#].*$/, '').replace(/\/(videos|featured|shorts|streams|about)\/?$/, '').replace(/\/$/, '');
     const name = String(req.body.name || '').trim() || clean.split('/').pop();
     const row = await one(
-      `INSERT INTO channels (url, name, category_id, trusted) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (url) DO UPDATE SET category_id = excluded.category_id, trusted = excluded.trusted RETURNING *`,
-      [clean, name, await categoryId(req.body.category), bool(req.body.trusted)],
+      `INSERT INTO channels (url, yt_channel_id, name, category_id, trusted, auto_sync) VALUES ($1, $2, $3, $4, $5, TRUE)
+       ON CONFLICT (url) DO UPDATE SET category_id = excluded.category_id, trusted = excluded.trusted, auto_sync = TRUE RETURNING *`,
+      [clean, feedId, name, await categoryId(req.body.category), bool(req.body.trusted)],
     );
-    let sync = null;
-    if (yt.hasApiKey()) sync = await syncChannel(row).catch((err) => ({ error: err.message }));
+    const sync = await syncChannel(row).catch((err) => ({ error: err.message }));
     res.status(201).json({ id: row.id, sync });
   });
 
@@ -398,10 +439,11 @@ export function adminRouter({ single }) {
     const id = idParam(req);
     const c = id && (await one('SELECT * FROM channels WHERE id = $1', [id]));
     if (!c) return res.status(404).json({ error: 'not_found' });
-    await query('UPDATE channels SET trusted = $2, category_id = $3 WHERE id = $1', [
+    await query('UPDATE channels SET trusted = $2, category_id = $3, auto_sync = $4 WHERE id = $1', [
       id,
       req.body.trusted !== undefined ? bool(req.body.trusted) : c.trusted,
       req.body.category !== undefined ? await categoryId(req.body.category) : c.category_id,
+      req.body.autoSync !== undefined ? bool(req.body.autoSync) : c.auto_sync,
     ]);
     res.json({ ok: true });
   });

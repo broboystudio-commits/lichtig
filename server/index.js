@@ -1,9 +1,8 @@
-import { initDb, closeDb, many } from './db.js';
+import { initDb, closeDb } from './db.js';
 import { seed } from './seed.js';
 import { createApp } from './app.js';
 import { pruneSessions } from './auth.js';
-import { hasApiKey } from './youtube.js';
-import { syncChannel } from './admin.js';
+import { syncDueChannels } from './admin.js';
 import { failInterruptedImports } from './importer.js';
 import { cleanupOrphans } from './media.js';
 import { storageEnabled } from './storage.js';
@@ -27,15 +26,11 @@ const timers = [
   setInterval(() => cleanupOrphans().catch((err) => console.warn('Cleanup failed:', err.message)), 12 * 3600 * 1000),
 ];
 
-// Pull new uploads from approved channels every 6 hours when a YouTube API key is set.
-if (hasApiKey()) {
-  const syncAll = async () => {
-    for (const ch of await many('SELECT * FROM channels WHERE yt_channel_id IS NOT NULL OR url LIKE $1', ['https://%'])) {
-      await syncChannel(ch).catch((err) => console.warn('Channel sync failed:', ch.url, err.message));
-    }
-  };
-  timers.push(setInterval(() => syncAll().catch(() => {}), 6 * 3600 * 1000));
-}
+// Check followed channels for new uploads. On a free Render plan the server sleeps when
+// idle, so instead of waiting for a long timer it checks shortly after every wake-up and
+// then every 30 minutes; each channel is only fetched once it's 6 hours old.
+const checkChannels = () => syncDueChannels().catch((err) => console.warn('Channel check failed:', err.message));
+timers.push(setTimeout(checkChannels, 20 * 1000), setInterval(checkChannels, 30 * 60 * 1000));
 timers.forEach((t) => t.unref());
 
 const shutdown = () =>
